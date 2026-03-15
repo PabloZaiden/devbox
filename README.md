@@ -85,6 +85,8 @@ bun test
 bun run build
 ```
 
+Pull requests run the same test-and-build checks automatically through GitHub Actions.
+
 The build step emits a bundled executable JS entrypoint at `dist/devbox.js`.
 
 For local development from this repository:
@@ -119,4 +121,3 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
 - When the host already has Git author identity configured, `devbox` copies it into the container user's global Git config if the container does not already define those values.
-
