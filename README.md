@@ -8,6 +8,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 
 - Discovers `.devcontainer/devcontainer.json` or `.devcontainer.json` in the current directory.
 - Reuses or creates the devcontainer with Docker + Dev Container CLI.
+- Names the managed container as `devbox-<project>-<port>`.
 - Publishes the same TCP port on host and container.
 - Mounts the current directory into the container as the workspace.
 - Shares a usable SSH agent socket with the container and copies `known_hosts` into the container.

@@ -31,6 +31,7 @@ export interface DiscoveredConfig {
 
 export interface ManagedConfigOptions {
   port: number;
+  containerName: string;
   sshAuthSock: string | null;
   knownHostsPath: string | null;
 }
@@ -207,6 +208,19 @@ export function getDefaultRemoteWorkspaceFolder(workspacePath: string): string {
   return path.posix.join("/workspaces", path.basename(workspacePath));
 }
 
+export function getManagedContainerName(workspacePath: string, port: number): string {
+  const projectName = path.basename(workspacePath);
+  const normalized = projectName
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "")
+    .replace(/-+/g, "-");
+  const safeProjectName = normalized.length > 0 ? normalized : hashWorkspacePath(workspacePath);
+
+  return `devbox-${safeProjectName.slice(0, 48)}-${port}`;
+}
+
 export async function loadWorkspaceState(workspacePath: string): Promise<WorkspaceState | null> {
   const statePath = getWorkspaceStateFile(workspacePath);
   if (!existsSync(statePath)) {
@@ -343,7 +357,7 @@ export async function removeGeneratedConfig(generatedConfigPath: string): Promis
 
 export function buildManagedConfig(baseConfig: DevcontainerConfig, options: ManagedConfigOptions): DevcontainerConfig {
   const managedConfig = structuredClone(baseConfig);
-  const runArgs = getStringArray(managedConfig.runArgs, "runArgs");
+  const runArgs = withManagedContainerName(getStringArray(managedConfig.runArgs, "runArgs"), options.containerName);
   if (!hasPublishedPort(runArgs, options.port)) {
     runArgs.push("-p", `${options.port}:${options.port}`);
   }
@@ -406,6 +420,28 @@ export function quoteShell(value: string): string {
 
 function dedupe(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function withManagedContainerName(runArgs: string[], containerName: string): string[] {
+  const next: string[] = [];
+
+  for (let index = 0; index < runArgs.length; index += 1) {
+    const current = runArgs[index];
+
+    if (current === "--name") {
+      index += 1;
+      continue;
+    }
+
+    if (current.startsWith("--name=")) {
+      continue;
+    }
+
+    next.push(current);
+  }
+
+  next.push("--name", containerName);
+  return next;
 }
 
 function hasPublishedPort(runArgs: string[], port: number): boolean {

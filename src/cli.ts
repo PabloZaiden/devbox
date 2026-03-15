@@ -9,6 +9,7 @@ import {
   getDefaultRemoteWorkspaceFolder,
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
+  getManagedContainerName,
   getKnownHostsPath,
   getManagedLabels,
   getWorkspaceUserDataDir,
@@ -27,6 +28,7 @@ import {
   assertPortAvailable,
   copyKnownHosts,
   devcontainerUp,
+  ensureSshAuthSockAccessible,
   ensureGeneratedConfigIgnored,
   ensureHostEnvironment,
   ensurePathIgnored,
@@ -36,6 +38,7 @@ import {
   labelsForWorkspaceHash,
   listManagedContainers,
   persistRunnerHostKeys,
+  requiresSshAuthSockPermissionFix,
   removeContainers,
   restoreRunnerHostKeys,
   startRunner,
@@ -77,9 +80,11 @@ async function handleUpLike(
   const workspaceHash = hashWorkspacePath(workspacePath);
   const labels = getManagedLabels(workspaceHash);
   const userDataDir = getWorkspaceUserDataDir(workspacePath);
+  const containerName = getManagedContainerName(workspacePath, port);
 
   const managedConfig = buildManagedConfig(discovered.config, {
     port,
+    containerName,
     sshAuthSock: environment.sshAuthSock,
     knownHostsPath,
   });
@@ -119,6 +124,7 @@ async function handleUpLike(
   );
   await assertPortAvailable(port, allowCurrentPort);
 
+  console.log(`Starting workspace on port ${port}...`);
   const upResult = await devcontainerUp({
     workspacePath,
     generatedConfigPath,
@@ -127,11 +133,18 @@ async function handleUpLike(
   });
   const remoteWorkspaceFolder = upResult.remoteWorkspaceFolder ?? getDefaultRemoteWorkspaceFolder(workspacePath);
 
+  console.log("Configuring SSH access inside the devcontainer...");
   await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME));
+  if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
+    console.log("Making the forwarded SSH agent socket accessible to the container user...");
+    await ensureSshAuthSockAccessible(upResult.containerId);
+  }
   await copyKnownHosts(upResult.containerId);
   await stopManagedSshd(upResult.containerId);
   await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
+  console.log("Installing and starting the SSH server inside the container (first run can take a bit)...");
   await startRunner(upResult.containerId, port, remoteWorkspaceFolder);
+  console.log("Saving SSH server state for future runs...");
   await persistRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
 
   await saveWorkspaceState(

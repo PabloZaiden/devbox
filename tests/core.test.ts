@@ -8,6 +8,7 @@ import {
   getDefaultRemoteWorkspaceFolder,
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
+  getManagedContainerName,
   getManagedLabels,
   parseArgs,
   resolvePort,
@@ -92,11 +93,12 @@ describe("buildManagedConfig", () => {
 
     const managed = buildManagedConfig(baseConfig, {
       port: 5001,
+      containerName: "devbox-example-5001",
       sshAuthSock: "/tmp/agent.sock",
       knownHostsPath: "/tmp/known_hosts",
     });
 
-    expect(managed.runArgs).toEqual(["--init", "-p", "5001:5001"]);
+    expect(managed.runArgs).toEqual(["--init", "--name", "devbox-example-5001", "-p", "5001:5001"]);
     expect(managed.mounts).toEqual([
       "type=bind,source=/tmp/a,target=/tmp/a",
       "type=bind,source=/tmp/agent.sock,target=/tmp/devbox-ssh-auth.sock",
@@ -119,6 +121,7 @@ describe("buildManagedConfig", () => {
       },
       {
         port: 5001,
+        containerName: "devbox-example-5001",
         sshAuthSock: null,
         knownHostsPath: null,
       },
@@ -134,16 +137,17 @@ describe("buildManagedConfig", () => {
     const managed = buildManagedConfig(
       {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
-        runArgs: ["-p", "5001:5001"],
+        runArgs: ["--name", "custom-name", "-p", "5001:5001"],
       },
       {
         port: 5001,
+        containerName: "devbox-example-5001",
         sshAuthSock: "/tmp/agent.sock",
         knownHostsPath: null,
       },
     );
 
-    expect(managed.runArgs).toEqual(["-p", "5001:5001"]);
+    expect(managed.runArgs).toEqual(["-p", "5001:5001", "--name", "devbox-example-5001"]);
   });
 });
 
@@ -160,6 +164,12 @@ describe("paths and labels", () => {
     );
     expect(getDefaultRemoteWorkspaceFolder("/tmp/ws/example-project")).toBe(
       "/workspaces/example-project",
+    );
+    expect(getManagedContainerName("/tmp/ws/example-project", 5001)).toBe(
+      "devbox-example-project-5001",
+    );
+    expect(getManagedContainerName("/tmp/ws/Project Name!", 6000)).toBe(
+      "devbox-project-name-6000",
     );
     expect(getManagedLabels("hash123")).toEqual({
       "devbox.managed": "true",

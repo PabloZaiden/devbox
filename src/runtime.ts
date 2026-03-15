@@ -13,6 +13,7 @@ import {
   RUNNER_CRED_FILENAME,
   RUNNER_HOST_KEYS_DIRNAME,
   RUNNER_URL,
+  SSH_AUTH_SOCK_TARGET,
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 
@@ -36,7 +37,7 @@ interface ExecOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   stdoutMode?: "capture" | "raw" | "devcontainer-json";
-  stderrMode?: "capture" | "raw";
+  stderrMode?: "capture" | "raw" | "devcontainer-json";
   allowFailure?: boolean;
 }
 
@@ -66,6 +67,78 @@ export function getRunnerSummaryLines(output: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trimEnd())
     .filter((line) => /^(SSH user|SSH pass|SSH port|PermitRootLogin): /.test(line));
+}
+
+export function formatDevcontainerProgressLine(line: string): string | null {
+  const cleaned = stripAnsi(line).trim();
+  if (!cleaned) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const text = typeof parsed.text === "string" ? stripAnsi(parsed.text).trim() : "";
+    const type = typeof parsed.type === "string" ? parsed.type : "";
+    const level = typeof parsed.level === "number" ? parsed.level : undefined;
+
+    if (parsed.outcome !== undefined) {
+      return null;
+    }
+
+    if (!text) {
+      return null;
+    }
+
+    if (text.startsWith("Error:")) {
+      return text;
+    }
+
+    if (type === "start") {
+      if (text === "Resolving Remote") {
+        return "Preparing devcontainer...";
+      }
+      if (text === "Starting container") {
+        return "Starting container...";
+      }
+      return null;
+    }
+
+    if (type === "raw" && text === "Container started") {
+      return "Container started.";
+    }
+
+    if (text.startsWith("workspace root: ")) {
+      return `Workspace: ${text.slice("workspace root: ".length)}`;
+    }
+
+    if (
+      text === "No user features to update" ||
+      text === "Inspecting container" ||
+      text.startsWith("Run: ") ||
+      text.startsWith("Run in container: ") ||
+      text.startsWith("userEnvProbe") ||
+      text.startsWith("LifecycleCommandExecutionMap:") ||
+      text.startsWith("Exit code ")
+    ) {
+      return null;
+    }
+
+    if (level !== undefined && level >= 2) {
+      return null;
+    }
+
+    return text;
+  } catch {
+    return cleaned;
+  }
+}
+
+export function requiresSshAuthSockPermissionFix(sshAuthSockSource: string | null): boolean {
+  return sshAuthSockSource === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE;
+}
+
+export function buildEnsureSshAuthSockAccessibleScript(): string {
+  return `if [ -S ${quoteShell(SSH_AUTH_SOCK_TARGET)} ]; then chmod 666 ${quoteShell(SSH_AUTH_SOCK_TARGET)}; fi`;
 }
 
 export function getRunnerHostKeysDir(remoteWorkspaceFolder: string): string {
@@ -277,7 +350,7 @@ export async function devcontainerUp(input: {
 
   const result = await execute(args, {
     stdoutMode: "devcontainer-json",
-    stderrMode: "raw",
+    stderrMode: "devcontainer-json",
   });
 
   const outcome = parseDevcontainerOutcome(result.stdout);
@@ -295,6 +368,13 @@ export async function copyKnownHosts(containerId: string): Promise<void> {
 
 export async function stopManagedSshd(containerId: string): Promise<void> {
   await devcontainerExec(containerId, buildStopManagedSshdScript(), { quiet: true });
+}
+
+export async function ensureSshAuthSockAccessible(containerId: string): Promise<void> {
+  await dockerExec(containerId, buildEnsureSshAuthSockAccessibleScript(), {
+    quiet: true,
+    user: "root",
+  });
 }
 
 export async function restoreRunnerHostKeys(
@@ -517,26 +597,10 @@ async function consumeStream(
 }
 
 function renderDevcontainerJsonLine(line: string, writer: NodeJS.WriteStream): void {
-  if (line.trim().length === 0) {
-    writer.write("\n");
-    return;
+  const formatted = formatDevcontainerProgressLine(line);
+  if (formatted) {
+    writer.write(`${formatted}\n`);
   }
-
-  try {
-    const parsed = JSON.parse(line) as Record<string, unknown>;
-    if (typeof parsed.text === "string") {
-      writer.write(`${parsed.text}\n`);
-      return;
-    }
-
-    if (parsed.outcome !== undefined) {
-      return;
-    }
-  } catch {
-    // Fall through to raw output.
-  }
-
-  writer.write(`${line}\n`);
 }
 
 function parseDevcontainerOutcome(stdout: string): UpResult | null {
@@ -570,6 +634,10 @@ export function formatCommandError(error: CommandError): string {
   }
 
   return `${error.message}\n${details}`;
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(/\u001B\[[0-9;]*m/g, "");
 }
 
 export function labelsForWorkspaceHash(workspaceHash: string): Record<string, string> {
