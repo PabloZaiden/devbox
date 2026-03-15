@@ -85,6 +85,8 @@ bun test
 bun run build
 ```
 
+Pull requests run the same test-and-build checks automatically through GitHub Actions.
+
 The build step emits a bundled executable JS entrypoint at `dist/devbox.js`.
 
 For local development from this repository:
