@@ -99,6 +99,15 @@ cd examples/smoke-workspace
 ../../dist/devbox.js up <port> --allow-missing-ssh
 ```
 
+For a more realistic feature-heavy example, this repository also includes `examples/complex-workspace/.devcontainer/devcontainer.json`:
+
+```bash
+cd examples/complex-workspace
+../../dist/devbox.js up <port>
+```
+
+The complex example uses several devcontainer features, so the first `up` or `rebuild` can take a while. `devbox` prints periodic elapsed-time progress lines while the devcontainer image/features are still being prepared and while the SSH runner is being installed.
+
 ## Notes
 
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
@@ -111,12 +120,3 @@ cd examples/smoke-workspace
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
 - When the host already has Git author identity configured, `devbox` copies it into the container user's global Git config if the container does not already define those values.
 
-## Releasing to npm
-
-Publishing is wired through `.github/workflows/release-npm-package.yml`.
-
-- Create a GitHub release tagged like `v1.2.3`.
-- The workflow checks out that tag, sets `package.json` to version `1.2.3`, installs dependencies, runs tests, builds the package, and publishes `@pablozaiden/devbox` to npm.
-- The workflow uses npm trusted publishing (`id-token: write`), so no npm token has to be stored in the repository.
-
-Before the first release, enable trusted publishing for `@pablozaiden/devbox` in npm and connect it to the `PabloZaiden/devbox` GitHub repository.
