@@ -98,16 +98,23 @@ async function handleUpLike(
     containerName,
     sshAuthSock: environment.sshAuthSock,
     knownHostsPath,
+    githubTokenAvailable: environment.githubToken !== null,
   });
 
   if (environment.warning) {
     console.warn(`Warning: ${environment.warning}`);
+  }
+  if (environment.githubTokenWarning) {
+    console.warn(`Warning: ${environment.githubTokenWarning}`);
   }
 
   if (environment.sshAuthSock === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE) {
     console.log("Using Docker Desktop SSH agent sharing.");
   } else if (environment.sshAuthSock) {
     console.log(`Using host SSH agent socket from ${environment.sshAuthSock}.`);
+  }
+  if (environment.githubToken) {
+    console.log("Using host GitHub authentication from gh.");
   }
 
   await ensureGeneratedConfigIgnored(workspacePath, generatedConfigPath);
@@ -152,6 +159,7 @@ async function handleUpLike(
         generatedConfigPath,
         userDataDir,
         labels,
+        processEnv: environment.githubToken ? { GH_TOKEN: environment.githubToken } : undefined,
       }),
   });
   const remoteWorkspaceFolder = upResult.remoteWorkspaceFolder ?? getDefaultRemoteWorkspaceFolder(workspacePath);
