@@ -12,6 +12,7 @@ import {
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
   getManagedContainerName,
+  getManagedPortFromContainerName,
   getManagedLabels,
   helpText,
   parseArgs,
@@ -141,6 +142,19 @@ describe("resolveUpPortPreference", () => {
 
   test("returns undefined when up should auto-assign a new port", () => {
     expect(resolveUpPortPreference({ explicitPort: undefined, state: null, existingPublishedPort: undefined })).toBeUndefined();
+  });
+});
+
+describe("getManagedPortFromContainerName", () => {
+  test("round-trips the managed container name format", () => {
+    const containerName = getManagedContainerName("/tmp/my-workspace", 5007);
+    expect(getManagedPortFromContainerName(containerName)).toBe(5007);
+    expect(getManagedPortFromContainerName(`/${containerName}`)).toBe(5007);
+  });
+
+  test("ignores names that do not follow the managed naming convention", () => {
+    expect(getManagedPortFromContainerName("my-container")).toBeUndefined();
+    expect(getManagedPortFromContainerName("/devbox-example")).toBeUndefined();
   });
 });
 

@@ -11,6 +11,7 @@ import {
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
   getManagedContainerName,
+  getManagedPortFromContainerName,
   getKnownHostsPath,
   getManagedLabels,
   getWorkspaceUserDataDir,
@@ -85,6 +86,7 @@ async function handleUpLike(
   allowMissingSsh: boolean,
   devcontainerSubpath: string | undefined,
 ): Promise<void> {
+  const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
   const workspaceHash = hashWorkspacePath(workspacePath);
   const labels = getManagedLabels(workspaceHash);
   const existingContainerIds = await listManagedContainers(labels);
@@ -102,13 +104,12 @@ async function handleUpLike(
       ? (resolveUpPortPreference({
           explicitPort,
           state,
-          existingPublishedPort: getPreferredPublishedHostPort(existingInspects[0]),
+          existingPublishedPort: getManagedPortFromContainerName(existingInspects[0]?.Name),
         }) ?? (await findFirstAvailablePort(DEFAULT_UP_AUTO_PORT_START)))
       : resolvePort(command, explicitPort, state);
 
   console.log(`Using port ${port}. ${command === "up" ? describeUpPortStrategy() : ""}`.trim());
 
-  const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
   const knownHostsPath = await getKnownHostsPath();
   const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
   const generatedConfigPath = getGeneratedConfigPath(discovered.path);
@@ -309,15 +310,6 @@ function getPublishedHostPorts(container: DockerInspect): number[] {
   }
 
   return [...values];
-}
-
-function getPreferredPublishedHostPort(container: DockerInspect | undefined): number | undefined {
-  if (!container) {
-    return undefined;
-  }
-
-  const [port] = getPublishedHostPorts(container);
-  return port;
 }
 
 async function runStepWithHeartbeat<T>(input: {

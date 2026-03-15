@@ -261,6 +261,29 @@ export function getManagedContainerName(workspacePath: string, port: number): st
   return `devbox-${safeProjectName.slice(0, 48)}-${port}`;
 }
 
+export function getManagedPortFromContainerName(containerName: string | undefined): number | undefined {
+  if (!containerName) {
+    return undefined;
+  }
+
+  const normalizedName = containerName.replace(/^\//, "");
+  if (!normalizedName.startsWith("devbox-")) {
+    return undefined;
+  }
+
+  const match = normalizedName.match(/-(\d+)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const port = Number(match[1]);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return undefined;
+  }
+
+  return port;
+}
+
 export async function loadWorkspaceState(workspacePath: string): Promise<WorkspaceState | null> {
   const statePath = getWorkspaceStateFile(workspacePath);
   if (!existsSync(statePath)) {

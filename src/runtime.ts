@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { access, appendFile, mkdir, readFile } from "node:fs/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
+import { createServer } from "node:net";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
@@ -59,6 +60,11 @@ export interface ResolvedHostEnvironment extends ResolvedSshAuthSock {
 export interface ResolvedGhCliToken {
   token: string | null;
   warning?: string;
+}
+
+export interface PortAvailability {
+  available: boolean;
+  pids: string[];
 }
 
 export function isExecutableAvailable(command: string): boolean {
@@ -404,8 +410,8 @@ export async function inspectContainers(containerIds: string[]): Promise<DockerI
 }
 
 export async function assertPortAvailable(port: number, allowIfManagedContainerOwnsPort: boolean): Promise<void> {
-  const pids = await findListeningPids(port);
-  if (pids.length === 0) {
+  const availability = await probePortAvailability(port);
+  if (availability.available) {
     return;
   }
 
@@ -413,7 +419,11 @@ export async function assertPortAvailable(port: number, allowIfManagedContainerO
     return;
   }
 
-  throw new UserError(`Host port ${port} is already in use by PID(s): ${pids.join(", ")}.`);
+  if (availability.pids.length > 0) {
+    throw new UserError(`Host port ${port} is already in use by PID(s): ${availability.pids.join(", ")}.`);
+  }
+
+  throw new UserError(`Host port ${port} is already in use.`);
 }
 
 export async function findFirstAvailablePort(
@@ -790,9 +800,83 @@ async function findListeningPids(port: number): Promise<string[]> {
   return [];
 }
 
+export async function probePortAvailability(
+  port: number,
+  options?: {
+    canUseLsof?: boolean;
+    listListeningPids?: (port: number) => Promise<string[]>;
+    tryBindPort?: (port: number) => Promise<boolean>;
+  },
+): Promise<PortAvailability> {
+  const canUseLsof = options?.canUseLsof ?? isExecutableAvailable("lsof");
+  if (canUseLsof) {
+    const pids = await (options?.listListeningPids ?? findListeningPids)(port);
+    return {
+      available: pids.length === 0,
+      pids,
+    };
+  }
+
+  return {
+    available: await (options?.tryBindPort ?? tryBindPort)(port),
+    pids: [],
+  };
+}
+
 async function defaultIsPortAvailable(port: number): Promise<boolean> {
-  const pids = await findListeningPids(port);
-  return pids.length === 0;
+  const availability = await probePortAvailability(port);
+  return availability.available;
+}
+
+async function tryBindPort(port: number): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    const server = createServer();
+    let settled = false;
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      server.removeAllListeners();
+      callback();
+    };
+
+    server.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE") {
+        finish(() => resolve(false));
+        return;
+      }
+
+      finish(() =>
+        reject(
+          new UserError(
+            `Could not determine whether port ${port} is free because a fallback bind probe failed: ${error.message}.`,
+          ),
+        ),
+      );
+    });
+
+    server.once("listening", () => {
+      server.close((error) => {
+        if (error) {
+          finish(() =>
+            reject(
+              new UserError(
+                `Could not determine whether port ${port} is free because a fallback bind probe could not close cleanly: ${error.message}.`,
+              ),
+            ),
+          );
+          return;
+        }
+
+        finish(() => resolve(true));
+      });
+    });
+
+    server.listen({ port, exclusive: true });
+  });
 }
 
 async function execute(command: string[], options: ExecOptions): Promise<ExecResult> {

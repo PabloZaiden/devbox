@@ -17,6 +17,7 @@ import {
   getRunnerSummaryLines,
   isExecutableAvailable,
   looksLikeGhUnauthenticatedError,
+  probePortAvailability,
   redactSensitiveOutput,
   resolveShellContainerId,
   resolveGhCliToken,
@@ -127,6 +128,32 @@ describe("findFirstAvailablePort", () => {
     await expect(findFirstAvailablePort(65535, async () => false)).rejects.toThrow(
       "No available host port was found starting at 65535.",
     );
+  });
+});
+
+describe("probePortAvailability", () => {
+  test("uses lsof PID results when available", async () => {
+    await expect(
+      probePortAvailability(5001, {
+        canUseLsof: true,
+        listListeningPids: async () => ["1234"],
+      }),
+    ).resolves.toEqual({
+      available: false,
+      pids: ["1234"],
+    });
+  });
+
+  test("falls back to bind probing when lsof is unavailable", async () => {
+    await expect(
+      probePortAvailability(5001, {
+        canUseLsof: false,
+        tryBindPort: async () => false,
+      }),
+    ).resolves.toEqual({
+      available: false,
+      pids: [],
+    });
   });
 });
 
