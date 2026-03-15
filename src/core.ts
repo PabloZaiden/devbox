@@ -15,7 +15,7 @@ import {
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 
-export type CommandName = "up" | "down" | "rebuild" | "help";
+export type CommandName = "up" | "down" | "rebuild" | "shell" | "help";
 
 export interface ParsedArgs {
   command: CommandName;
@@ -81,7 +81,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME} [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} --help\n\nNotes:\n  - The same port is published on host and container.\n  - If no port is provided for up/rebuild, the last stored port for this workspace is reused.\n  - Pass --allow-missing-ssh to continue without SSH agent sharing when no usable SSH agent socket is available.\n  - Pass --devcontainer-subpath to use .devcontainer/<subpath>/devcontainer.json.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
+  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME} [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} --help\n\nNotes:\n  - The same port is published on host and container.\n  - If no port is provided for up/rebuild, the last stored port for this workspace is reused.\n  - Pass --allow-missing-ssh to continue without SSH agent sharing when no usable SSH agent socket is available.\n  - Pass --devcontainer-subpath to use .devcontainer/<subpath>/devcontainer.json.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -94,7 +94,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let command: CommandName = "up";
   const first = args[0];
 
-  if (first === "up" || first === "down" || first === "rebuild" || first === "help") {
+  if (first === "up" || first === "down" || first === "rebuild" || first === "shell" || first === "help") {
     command = first;
     args.shift();
   } else if (first === "--help" || first === "-h") {
@@ -163,11 +163,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (command === "down") {
       throw new UserError("The down command does not accept a port.");
     }
+    if (command === "shell") {
+      throw new UserError("The shell command does not accept a port.");
+    }
     port = parsePort(positionals[0]);
   }
 
   if (command === "down" && port !== undefined) {
     throw new UserError("The down command does not accept a port.");
+  }
+
+  if (command === "shell" && port !== undefined) {
+    throw new UserError("The shell command does not accept a port.");
+  }
+
+  if (command === "shell" && devcontainerSubpath !== undefined) {
+    throw new UserError("The shell command does not accept --devcontainer-subpath.");
   }
 
   if (devcontainerSubpath) {
@@ -280,7 +291,7 @@ export async function deleteWorkspaceState(workspacePath: string): Promise<void>
 }
 
 export function resolvePort(command: CommandName, explicitPort: number | undefined, state: WorkspaceState | null): number {
-  if (command === "down" || command === "help") {
+  if (command === "down" || command === "shell" || command === "help") {
     throw new UserError(`resolvePort cannot be used for ${command}.`);
   }
 

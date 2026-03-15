@@ -148,6 +148,15 @@ export function buildEnsureSshAuthSockAccessibleScript(): string {
   return `if [ -S ${quoteShell(SSH_AUTH_SOCK_TARGET)} ]; then chmod 666 ${quoteShell(SSH_AUTH_SOCK_TARGET)}; fi`;
 }
 
+export function buildInteractiveShellScript(): string {
+  return [
+    "if command -v bash >/dev/null 2>&1; then",
+    "  exec bash -l",
+    "fi",
+    "exec sh",
+  ].join("\n");
+}
+
 export function getRunnerHostKeysDir(remoteWorkspaceFolder: string): string {
   const trimmed = remoteWorkspaceFolder.endsWith("/")
     ? remoteWorkspaceFolder.slice(0, -1)
@@ -425,6 +434,56 @@ export async function persistRunnerHostKeys(
   });
 }
 
+export function resolveShellContainerId(input: {
+  containers: DockerInspect[];
+  preferredContainerId?: string;
+}): string {
+  const running = input.containers.filter((container) => container.State?.Running);
+
+  if (input.preferredContainerId) {
+    const preferred = running.find((container) => container.Id === input.preferredContainerId);
+    if (preferred) {
+      return preferred.Id;
+    }
+  }
+
+  if (running.length === 1) {
+    return running[0].Id;
+  }
+
+  if (running.length === 0) {
+    throw new UserError("No running managed container was found for this workspace. Run `devbox up` first.");
+  }
+
+  throw new UserError("More than one managed container is running for this workspace. Run `devbox down` first.");
+}
+
+export function buildDevcontainerShellCommand(
+  containerId: string,
+  terminalSize?: { columns?: number; rows?: number },
+): string[] {
+  const args = ["devcontainer", "exec", "--container-id", containerId];
+
+  if (terminalSize?.columns && terminalSize.columns > 0) {
+    args.push("--terminal-columns", String(terminalSize.columns));
+  }
+  if (terminalSize?.rows && terminalSize.rows > 0) {
+    args.push("--terminal-rows", String(terminalSize.rows));
+  }
+
+  args.push("sh", "-lc", buildInteractiveShellScript());
+  return args;
+}
+
+export async function openInteractiveShell(containerId: string): Promise<number> {
+  return executeInteractive(
+    buildDevcontainerShellCommand(containerId, {
+      columns: process.stdout.isTTY ? process.stdout.columns : undefined,
+      rows: process.stdout.isTTY ? process.stdout.rows : undefined,
+    }),
+  );
+}
+
 async function hasDockerDesktopHostService(): Promise<boolean> {
   const result = await execute(["docker", "info", "--format", "{{.OperatingSystem}}"], {
     stdoutMode: "capture",
@@ -544,6 +603,28 @@ async function execute(command: string[], options: ExecOptions): Promise<ExecRes
   }
 
   return result;
+}
+
+async function executeInteractive(command: string[], options?: Pick<ExecOptions, "cwd" | "env">): Promise<number> {
+  const env = { ...process.env, ...(options?.env ?? {}) } as Record<string, string>;
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) {
+      delete env[key];
+    }
+  }
+
+  const subprocess = spawn(command[0], command.slice(1), {
+    cwd: options?.cwd,
+    env,
+    stdio: "inherit",
+  });
+
+  return new Promise<number>((resolve, reject) => {
+    subprocess.once("error", reject);
+    subprocess.once("close", (exitCode) => {
+      resolve(exitCode ?? 0);
+    });
+  });
 }
 
 async function consumeStream(

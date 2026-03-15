@@ -38,7 +38,9 @@ import {
   isCommandError,
   labelsForWorkspaceHash,
   listManagedContainers,
+  openInteractiveShell,
   persistRunnerHostKeys,
+  resolveShellContainerId,
   requiresSshAuthSockPermissionFix,
   removeContainers,
   restoreRunnerHostKeys,
@@ -56,6 +58,11 @@ async function main(): Promise<void> {
 
   const workspacePath = await realpath(process.cwd());
   const state = await loadWorkspaceState(workspacePath);
+
+  if (parsed.command === "shell") {
+    await handleShell(workspacePath, state);
+    return;
+  }
 
   if (parsed.command === "down") {
     await handleDown(workspacePath, state, parsed.devcontainerSubpath);
@@ -165,6 +172,30 @@ async function handleUpLike(
   if (!knownHostsPath) {
     console.log("Host known_hosts was not found, so only SSH agent sharing was configured.");
   }
+}
+
+async function handleShell(
+  workspacePath: string,
+  state: Awaited<ReturnType<typeof loadWorkspaceState>>,
+): Promise<void> {
+  if (!isExecutableAvailable("docker")) {
+    throw new UserError("Docker is required but was not found in PATH.");
+  }
+
+  if (!isExecutableAvailable("devcontainer")) {
+    throw new UserError("Dev Container CLI is required but was not found in PATH.");
+  }
+
+  const labels = labelsForWorkspaceHash(hashWorkspacePath(workspacePath));
+  const containerIds = await listManagedContainers(labels);
+  const containers = await inspectContainers(containerIds);
+  const containerId = resolveShellContainerId({
+    containers,
+    preferredContainerId: state?.lastContainerId,
+  });
+
+  console.log(`Opening shell inside ${containerId.slice(0, 12)}...`);
+  process.exitCode = await openInteractiveShell(containerId);
 }
 
 async function handleDown(

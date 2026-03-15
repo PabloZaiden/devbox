@@ -60,11 +60,16 @@ devbox up 5001 --devcontainer-subpath services/api
 # Rebuild/recreate the managed devcontainer
 devbox rebuild 5001
 
+# Open an interactive shell in the running managed devcontainer for this workspace
+devbox shell
+
 # Stop and remove the managed container while preserving the workspace-mounted SSH credentials
 devbox down
 ```
 
 If you omit the port for `up` or `rebuild`, `devbox` will reuse the last port stored for the current workspace.
+
+`devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
 
 ## Development
 
@@ -92,6 +97,7 @@ cd examples/smoke-workspace
 
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
+- `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
 - `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
 - Re-running `devbox` after a host restart recreates the desired state: container up, port published, SSH runner started again.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.

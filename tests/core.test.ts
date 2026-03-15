@@ -38,6 +38,10 @@ describe("parseArgs", () => {
     });
   });
 
+  test("supports the shell subcommand", () => {
+    expect(parseArgs(["shell"])).toEqual({ command: "shell", allowMissingSsh: false });
+  });
+
   test("supports selecting a devcontainer subpath", () => {
     expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
       command: "up",
@@ -60,6 +64,13 @@ describe("parseArgs", () => {
 
   test("down rejects ports", () => {
     expect(() => parseArgs(["down", "5001"])).toThrow();
+  });
+
+  test("shell rejects ports and devcontainer subpaths", () => {
+    expect(() => parseArgs(["shell", "5001"])).toThrow("The shell command does not accept a port.");
+    expect(() => parseArgs(["shell", "--devcontainer-subpath", "services/api"])).toThrow(
+      "The shell command does not accept --devcontainer-subpath.",
+    );
   });
 });
 

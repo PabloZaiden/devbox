@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
+import type { DockerInspect } from "../src/core";
 import {
+  buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
+  buildInteractiveShellScript,
   buildPersistRunnerHostKeysScript,
   buildRestoreRunnerHostKeysScript,
   buildStopManagedSshdScript,
@@ -10,6 +13,7 @@ import {
   getRunnerHostKeysDir,
   getRunnerSummaryLines,
   isExecutableAvailable,
+  resolveShellContainerId,
   requiresSshAuthSockPermissionFix,
   resolveSshAuthSockSource,
 } from "../src/runtime";
@@ -86,6 +90,73 @@ describe("buildStopManagedSshdScript", () => {
     expect(buildStopManagedSshdScript()).toContain("while read -r pid comm; do\n");
     expect(buildStopManagedSshdScript()).toContain('\ndone)\n');
     expect(buildStopManagedSshdScript()).not.toContain("do;");
+  });
+});
+
+describe("interactive shell helpers", () => {
+  test("prefers bash and falls back to sh", () => {
+    expect(buildInteractiveShellScript()).toContain("command -v bash");
+    expect(buildInteractiveShellScript()).toContain("exec bash -l");
+    expect(buildInteractiveShellScript()).toContain("exec sh");
+  });
+
+  test("builds the interactive devcontainer exec command", () => {
+    expect(buildDevcontainerShellCommand("abc123", { columns: 120, rows: 40 })).toEqual([
+      "devcontainer",
+      "exec",
+      "--container-id",
+      "abc123",
+      "--terminal-columns",
+      "120",
+      "--terminal-rows",
+      "40",
+      "sh",
+      "-lc",
+      buildInteractiveShellScript(),
+    ]);
+  });
+
+  test("uses the preferred running container when available", () => {
+    const containers: DockerInspect[] = [
+      { Id: "stopped", State: { Running: false } },
+      { Id: "running-a", State: { Running: true } },
+      { Id: "running-b", State: { Running: true } },
+    ];
+
+    expect(
+      resolveShellContainerId({
+        containers,
+        preferredContainerId: "running-b",
+      }),
+    ).toBe("running-b");
+  });
+
+  test("falls back to the only running container", () => {
+    const containers: DockerInspect[] = [
+      { Id: "stopped", State: { Running: false } },
+      { Id: "running-a", State: { Running: true } },
+    ];
+
+    expect(resolveShellContainerId({ containers, preferredContainerId: "missing" })).toBe("running-a");
+  });
+
+  test("throws when no managed container is running", () => {
+    const containers: DockerInspect[] = [{ Id: "stopped", State: { Running: false } }];
+
+    expect(() => resolveShellContainerId({ containers })).toThrow(
+      "No running managed container was found for this workspace. Run `devbox up` first.",
+    );
+  });
+
+  test("throws when more than one running container is available without a preferred match", () => {
+    const containers: DockerInspect[] = [
+      { Id: "running-a", State: { Running: true } },
+      { Id: "running-b", State: { Running: true } },
+    ];
+
+    expect(() => resolveShellContainerId({ containers })).toThrow(
+      "More than one managed container is running for this workspace. Run `devbox down` first.",
+    );
   });
 });
 
