@@ -1,0 +1,11 @@
+// Feature-heavy sample workspace used to exercise slower first-time container setup.
+{
+  "name": "devbox-complex-workspace",
+  "image": "mcr.microsoft.com/devcontainers/base:noble",
+  "features": {
+    "ghcr.io/devcontainers/features/azure-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/terraform:1": {}
+  }
+}

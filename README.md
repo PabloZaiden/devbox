@@ -99,6 +99,15 @@ cd examples/smoke-workspace
 ../../dist/devbox.js up <port> --allow-missing-ssh
 ```
 
+For a more realistic feature-heavy example, this repository also includes `examples/complex-workspace/.devcontainer/devcontainer.json`:
+
+```bash
+cd examples/complex-workspace
+../../dist/devbox.js up <port>
+```
+
+The complex example uses several devcontainer features, so the first `up` or `rebuild` can take a while. `devbox` prints periodic elapsed-time progress lines while the devcontainer image/features are still being prepared and while the SSH runner is being installed.
+
 ## Notes
 
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.

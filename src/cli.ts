@@ -49,7 +49,7 @@ import {
   startRunner,
   stopManagedSshd,
 } from "./runtime";
-import { RUNNER_HOST_KEYS_DIRNAME } from "./constants";
+import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, RUNNER_HOST_KEYS_DIRNAME } from "./constants";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
@@ -104,6 +104,12 @@ async function handleUpLike(
     console.warn(`Warning: ${environment.warning}`);
   }
 
+  if (environment.sshAuthSock === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE) {
+    console.log("Using Docker Desktop SSH agent sharing.");
+  } else if (environment.sshAuthSock) {
+    console.log(`Using host SSH agent socket from ${environment.sshAuthSock}.`);
+  }
+
   await ensureGeneratedConfigIgnored(workspacePath, generatedConfigPath);
   await removeGeneratedConfig(legacyGeneratedConfigPath);
   await writeManagedConfig(generatedConfigPath, managedConfig);
@@ -136,11 +142,17 @@ async function handleUpLike(
   await assertPortAvailable(port, allowCurrentPort);
 
   console.log(`Starting workspace on port ${port}...`);
-  const upResult = await devcontainerUp({
-    workspacePath,
-    generatedConfigPath,
-    userDataDir,
-    labels,
+  const upResult = await runStepWithHeartbeat({
+    startMessage: "Preparing devcontainer. First builds with features may take several minutes...",
+    heartbeatMessage: "Still preparing devcontainer",
+    successMessage: "Devcontainer is ready",
+    action: () =>
+      devcontainerUp({
+        workspacePath,
+        generatedConfigPath,
+        userDataDir,
+        labels,
+      }),
   });
   const remoteWorkspaceFolder = upResult.remoteWorkspaceFolder ?? getDefaultRemoteWorkspaceFolder(workspacePath);
 
@@ -160,8 +172,12 @@ async function handleUpLike(
   }
   await stopManagedSshd(upResult.containerId);
   await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
-  console.log("Installing and starting the SSH server inside the container (first run can take a bit)...");
-  await startRunner(upResult.containerId, port, remoteWorkspaceFolder);
+  await runStepWithHeartbeat({
+    startMessage: "Installing and starting the SSH server inside the container (first run can take a bit)...",
+    heartbeatMessage: "Still installing and starting the SSH server",
+    successMessage: "SSH server is ready",
+    action: () => startRunner(upResult.containerId, port, remoteWorkspaceFolder),
+  });
   console.log("Saving SSH server state for future runs...");
   await persistRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
 
@@ -272,6 +288,44 @@ function getPublishedHostPorts(container: DockerInspect): number[] {
   }
 
   return [...values];
+}
+
+async function runStepWithHeartbeat<T>(input: {
+  startMessage: string;
+  heartbeatMessage: string;
+  successMessage?: string;
+  action: () => Promise<T>;
+  intervalMs?: number;
+}): Promise<T> {
+  const startedAt = Date.now();
+  const intervalMs = input.intervalMs ?? 20000;
+
+  console.log(input.startMessage);
+  const intervalId = setInterval(() => {
+    console.log(`${input.heartbeatMessage} (${formatElapsed(Date.now() - startedAt)} elapsed)...`);
+  }, intervalMs);
+
+  try {
+    const result = await input.action();
+    if (input.successMessage) {
+      console.log(`${input.successMessage} (${formatElapsed(Date.now() - startedAt)}).`);
+    }
+    return result;
+  } finally {
+    clearInterval(intervalId);
+  }
+}
+
+function formatElapsed(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes === 0) {
+    return `${seconds}s`;
+  }
+
+  return `${minutes}m ${seconds}s`;
 }
 
 main().catch((error: unknown) => {
