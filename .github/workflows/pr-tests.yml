@@ -24,6 +24,11 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install Dev Containers CLI
+        run: |
+          bun install --global @devcontainers/cli
+          devcontainer --version
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
