@@ -38,6 +38,26 @@ describe("parseArgs", () => {
     });
   });
 
+  test("supports selecting a devcontainer subpath", () => {
+    expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
+      command: "up",
+      port: 5001,
+      allowMissingSsh: false,
+      devcontainerSubpath: path.join("services", "api"),
+    });
+    expect(parseArgs(["--devcontainer-subpath=python"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      devcontainerSubpath: "python",
+    });
+  });
+
+  test("rejects devcontainer subpaths that escape .devcontainer", () => {
+    expect(() => parseArgs(["up", "5001", "--devcontainer-subpath", "../api"])).toThrow(
+      "Devcontainer subpath must stay inside .devcontainer.",
+    );
+  });
+
   test("down rejects ports", () => {
     expect(() => parseArgs(["down", "5001"])).toThrow();
   });
@@ -77,6 +97,45 @@ describe("discoverDevcontainerConfig", () => {
     const discovered = await discoverDevcontainerConfig(tempDir);
     expect(discovered.path).toBe(path.join(tempDir, ".devcontainer", "devcontainer.json"));
     expect(discovered.config.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+  });
+
+  test("finds a devcontainer file in the requested subpath", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    await mkdir(path.join(tempDir, ".devcontainer", "services", "api"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".devcontainer", "services", "api", "devcontainer.json"),
+      `{ "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm" }`,
+    );
+
+    const discovered = await discoverDevcontainerConfig(tempDir, path.join("services", "api"));
+    expect(discovered.path).toBe(path.join(tempDir, ".devcontainer", "services", "api", "devcontainer.json"));
+    expect(discovered.config.image).toBe("mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm");
+  });
+
+  test("falls back to workspace-root .devcontainer.json by default", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    await writeFile(
+      path.join(tempDir, ".devcontainer.json"),
+      `{ "image": "mcr.microsoft.com/devcontainers/base:ubuntu" }`,
+    );
+
+    const discovered = await discoverDevcontainerConfig(tempDir);
+    expect(discovered.path).toBe(path.join(tempDir, ".devcontainer.json"));
+  });
+
+  test("does not silently fall back when a requested subpath is missing", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    await writeFile(
+      path.join(tempDir, ".devcontainer.json"),
+      `{ "image": "mcr.microsoft.com/devcontainers/base:ubuntu" }`,
+    );
+
+    await expect(discoverDevcontainerConfig(tempDir, "missing")).rejects.toThrow(
+      "Expected .devcontainer/missing/devcontainer.json.",
+    );
   });
 });
 

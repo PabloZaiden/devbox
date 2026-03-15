@@ -58,11 +58,11 @@ async function main(): Promise<void> {
   const state = await loadWorkspaceState(workspacePath);
 
   if (parsed.command === "down") {
-    await handleDown(workspacePath, state);
+    await handleDown(workspacePath, state, parsed.devcontainerSubpath);
     return;
   }
 
-  await handleUpLike(parsed.command, workspacePath, state, parsed.port, parsed.allowMissingSsh);
+  await handleUpLike(parsed.command, workspacePath, state, parsed.port, parsed.allowMissingSsh, parsed.devcontainerSubpath);
 }
 
 async function handleUpLike(
@@ -71,11 +71,12 @@ async function handleUpLike(
   state: Awaited<ReturnType<typeof loadWorkspaceState>>,
   explicitPort: number | undefined,
   allowMissingSsh: boolean,
+  devcontainerSubpath: string | undefined,
 ): Promise<void> {
   const environment = await ensureHostEnvironment({ allowMissingSsh });
   const port = resolvePort(command, explicitPort, state);
   const knownHostsPath = await getKnownHostsPath();
-  const discovered = await discoverDevcontainerConfig(workspacePath);
+  const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
   const generatedConfigPath = getGeneratedConfigPath(discovered.path);
   const legacyGeneratedConfigPath = getLegacyGeneratedConfigPath(discovered.path);
   const workspaceHash = hashWorkspacePath(workspacePath);
@@ -169,6 +170,7 @@ async function handleUpLike(
 async function handleDown(
   workspacePath: string,
   state: Awaited<ReturnType<typeof loadWorkspaceState>>,
+  devcontainerSubpath: string | undefined,
 ): Promise<void> {
   if (!isExecutableAvailable("docker")) {
     throw new UserError("Docker is required but was not found in PATH.");
@@ -184,7 +186,7 @@ async function handleDown(
   }
 
   try {
-    const discovered = await discoverDevcontainerConfig(workspacePath);
+    const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
     generatedConfigPaths.add(getGeneratedConfigPath(discovered.path));
     generatedConfigPaths.add(getLegacyGeneratedConfigPath(discovered.path));
   } catch {

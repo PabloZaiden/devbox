@@ -6,7 +6,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 
 ## What it does
 
-- Discovers `.devcontainer/devcontainer.json` or `.devcontainer.json` in the current directory.
+- Discovers `.devcontainer/devcontainer.json` or `.devcontainer.json` in the current directory, and can target `.devcontainer/<subpath>/devcontainer.json` with a flag.
 - Reuses or creates the devcontainer with Docker + Dev Container CLI.
 - Names the managed container as `devbox-<project>-<port>`.
 - Publishes the same TCP port on host and container.
@@ -54,6 +54,9 @@ devbox up 5001
 # Continue even if SSH agent sharing is unavailable
 devbox up 5001 --allow-missing-ssh
 
+# Use a specific devcontainer under .devcontainer/services/api
+devbox up 5001 --devcontainer-subpath services/api
+
 # Rebuild/recreate the managed devcontainer
 devbox rebuild 5001
 
@@ -88,6 +91,7 @@ cd examples/smoke-workspace
 ## Notes
 
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
+- `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
 - Re-running `devbox` after a host restart recreates the desired state: container up, port published, SSH runner started again.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.

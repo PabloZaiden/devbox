@@ -21,6 +21,7 @@ export interface ParsedArgs {
   command: CommandName;
   port?: number;
   allowMissingSsh: boolean;
+  devcontainerSubpath?: string;
 }
 
 export type DevcontainerConfig = Record<string, unknown>;
@@ -80,7 +81,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME} [port] [--allow-missing-ssh]\n  ${CLI_NAME} up [port] [--allow-missing-ssh]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh]\n  ${CLI_NAME} down\n  ${CLI_NAME} --help\n\nNotes:\n  - The same port is published on host and container.\n  - If no port is provided for up/rebuild, the last stored port for this workspace is reused.\n  - Pass --allow-missing-ssh to continue without SSH agent sharing when no usable SSH agent socket is available.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
+  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME} [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} --help\n\nNotes:\n  - The same port is published on host and container.\n  - If no port is provided for up/rebuild, the last stored port for this workspace is reused.\n  - Pass --allow-missing-ssh to continue without SSH agent sharing when no usable SSH agent socket is available.\n  - Pass --devcontainer-subpath to use .devcontainer/<subpath>/devcontainer.json.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -102,6 +103,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   let port: number | undefined;
   let allowMissingSsh = false;
+  let devcontainerSubpath: string | undefined;
   const positionals: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -113,6 +115,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--allow-missing-ssh") {
       allowMissingSsh = true;
+      continue;
+    }
+
+    if (arg === "--devcontainer-subpath") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --devcontainer-subpath.");
+      }
+      devcontainerSubpath = parseDevcontainerSubpath(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--devcontainer-subpath=")) {
+      devcontainerSubpath = parseDevcontainerSubpath(arg.slice("--devcontainer-subpath=".length));
       continue;
     }
 
@@ -151,6 +168,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (command === "down" && port !== undefined) {
     throw new UserError("The down command does not accept a port.");
+  }
+
+  if (devcontainerSubpath) {
+    return { command, port, allowMissingSsh, devcontainerSubpath };
   }
 
   return { command, port, allowMissingSsh };
@@ -274,11 +295,11 @@ export function resolvePort(command: CommandName, explicitPort: number | undefin
   throw new UserError(`No port was provided and no previous port is stored for this workspace. Run \`${CLI_NAME} <port>\` first.`);
 }
 
-export async function discoverDevcontainerConfig(workspacePath: string): Promise<DiscoveredConfig> {
-  const candidates = [
-    path.join(workspacePath, ".devcontainer", "devcontainer.json"),
-    path.join(workspacePath, ".devcontainer.json"),
-  ];
+export async function discoverDevcontainerConfig(
+  workspacePath: string,
+  devcontainerSubpath?: string,
+): Promise<DiscoveredConfig> {
+  const candidates = getDevcontainerCandidates(workspacePath, devcontainerSubpath);
 
   for (const candidate of candidates) {
     if (!existsSync(candidate)) {
@@ -307,8 +328,12 @@ export async function discoverDevcontainerConfig(workspacePath: string): Promise
     return { path: candidate, config };
   }
 
+  const expectedLocations = devcontainerSubpath
+    ? `.devcontainer/${formatDevcontainerSubpath(devcontainerSubpath)}/devcontainer.json`
+    : ".devcontainer/devcontainer.json or .devcontainer.json";
+
   throw new UserError(
-    `No devcontainer definition was found in ${workspacePath}. Expected .devcontainer/devcontainer.json or .devcontainer.json.`,
+    `No devcontainer definition was found in ${workspacePath}. Expected ${expectedLocations}.`,
   );
 }
 
@@ -417,6 +442,39 @@ export async function getKnownHostsPath(): Promise<string | null> {
 
 export function quoteShell(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+}
+
+function parseDevcontainerSubpath(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new UserError("Devcontainer subpath cannot be empty.");
+  }
+
+  if (path.isAbsolute(trimmed) || trimmed.startsWith("\\")) {
+    throw new UserError(`Devcontainer subpath must stay inside .devcontainer. Received: ${raw}`);
+  }
+
+  const segments = trimmed.split(/[\\/]+/u).filter((segment) => segment.length > 0);
+  if (segments.length === 0 || segments.some((segment) => segment === "." || segment === "..")) {
+    throw new UserError(`Devcontainer subpath must stay inside .devcontainer. Received: ${raw}`);
+  }
+
+  return path.join(...segments);
+}
+
+function getDevcontainerCandidates(workspacePath: string, devcontainerSubpath?: string): string[] {
+  if (devcontainerSubpath) {
+    return [path.join(workspacePath, ".devcontainer", devcontainerSubpath, "devcontainer.json")];
+  }
+
+  return [
+    path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+    path.join(workspacePath, ".devcontainer.json"),
+  ];
+}
+
+function formatDevcontainerSubpath(subpath: string): string {
+  return subpath.split(path.sep).join("/");
 }
 
 function dedupe(values: string[]): string[] {
