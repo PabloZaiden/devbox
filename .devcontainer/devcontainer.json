@@ -7,7 +7,8 @@
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
 		"ghcr.io/pablozaiden/devcontainers-features/bun": {}
-	}
+	},
+	"postCreateCommand": "bun install --global @devcontainers/cli"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

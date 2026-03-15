@@ -10,7 +10,6 @@ import {
   DEFAULT_UP_AUTO_PORT_START,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   KNOWN_HOSTS_SNAPSHOT_FILENAME,
-  KNOWN_HOSTS_TARGET,
   LEGACY_GENERATED_CONFIG_BASENAME,
   MANAGED_LABEL_KEY,
   SSH_AUTH_SOCK_TARGET,
@@ -466,9 +465,6 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
   const mounts = getStringArray(managedConfig.mounts, "mounts");
   if (options.sshAuthSock && containerSshAuthSock) {
     mounts.push(`type=bind,source=${options.sshAuthSock},target=${containerSshAuthSock}`);
-  }
-  if (options.knownHostsPath) {
-    mounts.push(`type=bind,source=${options.knownHostsPath},target=${KNOWN_HOSTS_TARGET},readonly`);
   }
   managedConfig.mounts = dedupe(mounts);
 

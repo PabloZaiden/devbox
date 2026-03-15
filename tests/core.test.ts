@@ -248,13 +248,12 @@ describe("buildManagedConfig", () => {
     expect(managed.runArgs).toEqual(["--init", "--name", "devbox-example-5001", "-p", "5001:5001"]);
     expect(managed.mounts).toEqual([
       "type=bind,source=/tmp/a,target=/tmp/a",
-      "type=bind,source=/tmp/agent.sock,target=/tmp/devbox-ssh-auth.sock",
-      "type=bind,source=/tmp/known_hosts,target=/tmp/devbox-known_hosts,readonly",
+      "type=bind,source=/tmp/agent.sock,target=/run/devbox-ssh-auth.sock",
     ]);
     expect(managed.containerEnv).toEqual({
       FOO: "bar",
       GH_TOKEN: "${localEnv:GH_TOKEN}",
-      SSH_AUTH_SOCK: "/tmp/devbox-ssh-auth.sock",
+      SSH_AUTH_SOCK: "/run/devbox-ssh-auth.sock",
     });
   });
 
@@ -409,7 +408,7 @@ describe("prepareKnownHostsMount", () => {
 
 describe("getContainerSshAuthSockPath", () => {
   test("uses a stable tmp path for host sockets and preserves Docker Desktop host services", () => {
-    expect(getContainerSshAuthSockPath("/tmp/agent.sock")).toBe("/tmp/devbox-ssh-auth.sock");
+    expect(getContainerSshAuthSockPath("/tmp/agent.sock")).toBe("/run/devbox-ssh-auth.sock");
     expect(getContainerSshAuthSockPath(DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE)).toBe(
       DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
     );

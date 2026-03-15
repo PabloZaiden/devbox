@@ -89,10 +89,17 @@ When you run `devbox rebuild`, omitting the port reuses the last stored port for
 ```bash
 bun install
 bun test
+bun run test:fast
 bun run build
 ```
 
 Pull requests run the same test-and-build checks automatically through GitHub Actions.
+
+`bun test` now includes the real example-workspace devcontainer integration tests by default, so it requires Docker and the Dev Container CLI to be available locally.
+
+Use `bun test tests/examples.live.test.ts` to run only the live example-devcontainer suite.
+
+Use `bun run test:fast` if you want the non-live suite only, or run `DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 bun test` directly.
 
 The build step emits a bundled executable JS entrypoint at `dist/devbox.js`.
 

@@ -1,0 +1,690 @@
+import { existsSync } from "node:fs";
+import { chmod, cp, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import {
+  CLI_NAME,
+  DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+  MANAGED_LABEL_KEY,
+  RUNNER_CRED_FILENAME,
+  RUNNER_HOST_KEYS_DIRNAME,
+  SSH_AUTH_SOCK_TARGET,
+  WORKSPACE_LABEL_KEY,
+} from "../src/constants";
+import { getDefaultRemoteWorkspaceFolder, getManagedContainerName, hashWorkspacePath, quoteShell, type DockerInspect } from "../src/core";
+
+setDefaultTimeout(15 * 60_000);
+
+const repoRoot = process.cwd();
+const cliPath = path.join(repoRoot, "src", "cli.ts");
+const tempPaths: string[] = [];
+const cleanupTasks: Array<() => Promise<void>> = [];
+const skipLiveIntegration = process.env.DEVBOX_SKIP_LIVE_EXAMPLE_TESTS === "1";
+
+if (!skipLiveIntegration && !canRunLivePrerequisites()) {
+  throw new Error(
+    "Live example workspace tests require a working Docker daemon and the Dev Containers CLI in PATH. Set DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 to skip them.",
+  );
+}
+
+const liveTest = skipLiveIntegration ? test.skip : test.serial;
+
+interface CommandResult {
+  exitCode: number;
+  stderr: string;
+  stdout: string;
+}
+
+interface LiveFixtureOptions {
+  forceNoDockerDesktopHostService?: boolean;
+  ghToken?: string;
+  gitIdentity?: {
+    name: string;
+    email: string;
+  };
+  knownHosts?: string;
+  requireSshAuthSock?: boolean;
+}
+
+interface RunnerArtifacts {
+  ghToken: string;
+  gitUserEmail: string;
+  gitUserName: string;
+  hostKey: string;
+  hostKeyPub: string;
+  knownHosts: string;
+  runnerInvocations: string;
+  sshAuthSock: string;
+}
+
+interface LiveFixture {
+  env: Record<string, string>;
+  expectedContainerSshAuthSockPath: string | null;
+  knownHostsContent: string | null;
+  port: number;
+  remoteWorkspaceFolder: string;
+  runnerArtifacts: RunnerArtifacts;
+  runnerCredPath: string;
+  runnerHostKeyMarker: string;
+  sampleFilePath: string;
+  sshAuthSockPath: string | null;
+  statePath: string;
+  workspacePath: string;
+}
+
+afterEach(async () => {
+  for (const cleanup of cleanupTasks.splice(0).reverse()) {
+    try {
+      await cleanup();
+    } catch {
+      // Best-effort cleanup so one failed teardown does not hide the test result.
+    }
+  }
+
+  await Promise.all(
+    tempPaths.splice(0).map(async (tempPath) => {
+      await rm(tempPath, { recursive: true, force: true });
+    }),
+  );
+});
+
+describe("example workspaces (real devcontainers)", () => {
+  liveTest(
+    "smoke workspace exercises the real minimal devcontainer path",
+    async () => {
+      const fixture = await setupLiveFixture("smoke-workspace");
+      const up = runCli(fixture, ["up", String(fixture.port), "--allow-missing-ssh"]);
+
+      expect(up.exitCode).toBe(0);
+      expect(up.stdout).toContain(`Using port ${fixture.port}.`);
+      expect(up.stdout).toContain("Devcontainer is ready");
+      expect(up.stdout).toContain("SSH server:");
+      expect(up.stdout).toContain("Ready.");
+      expect(up.stderr).toContain("Continuing without SSH agent sharing.");
+
+      const state = await readJson(fixture.statePath);
+      const containerId = String(state.lastContainerId);
+      expect(state.port).toBe(fixture.port);
+
+      const inspect = inspectContainer(fixture, containerId);
+      expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, fixture.port)}`);
+      expect(inspect.Config?.Labels).toEqual(expect.objectContaining(state.labels));
+      expect(getPublishedHostPort(inspect, fixture.port)).toBe(String(fixture.port));
+
+      const sampleFileContent = await readFile(fixture.sampleFilePath, "utf8");
+      const sample = execInContainer(
+        fixture,
+        containerId,
+        `cat ${quoteShell(path.posix.join(fixture.remoteWorkspaceFolder, "sample-file.txt"))}`,
+      );
+      expect(sample.stdout).toBe(sampleFileContent);
+
+      expect(await readTrimmedFile(fixture.runnerArtifacts.sshAuthSock)).toBe("missing");
+      expect(existsSync(fixture.runnerArtifacts.ghToken)).toBe(false);
+      expect(existsSync(fixture.runnerArtifacts.gitUserName)).toBe(false);
+      expect(existsSync(fixture.runnerArtifacts.gitUserEmail)).toBe(false);
+      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
+      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKeyPub)).toBe(`${fixture.runnerHostKeyMarker}.pub`);
+      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([String(fixture.port)]);
+
+      const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
+      expect(runnerCredContent).toContain(`port=${fixture.port}`);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+      expect(down.stdout).toContain("Removed 1 managed container(s).");
+      expect(await listManagedContainerIds(fixture)).toEqual([]);
+      expect(existsSync(fixture.runnerCredPath)).toBe(true);
+      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
+      expect(existsSync(fixture.statePath)).toBe(false);
+    },
+    { timeout: 8 * 60_000 },
+  );
+
+  liveTest(
+    "complex workspace exercises real features and host integration",
+    async () => {
+      const fixture = await setupLiveFixture("complex-workspace", {
+        forceNoDockerDesktopHostService: false,
+        ghToken: "ghs_live_example_token",
+        gitIdentity: {
+          name: "Example Author",
+          email: "example@author.test",
+        },
+        knownHosts: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKnownHostsEntry\n",
+        requireSshAuthSock: true,
+      });
+      const up = runCli(fixture, ["up", String(fixture.port)]);
+
+      expect(up.exitCode).toBe(0);
+      expect(up.stdout).toContain(`Using port ${fixture.port}.`);
+      expect(
+        up.stdout.includes("Using host SSH agent socket from ") ||
+          up.stdout.includes("Using Docker Desktop SSH agent sharing."),
+      ).toBe(true);
+      expect(up.stdout).toContain("Using host GitHub authentication from gh.");
+      expect(up.stdout).toContain("Syncing Git author identity from the host into the devcontainer...");
+      expect(up.stdout).toContain("SSH server:");
+      expect(up.stdout).toContain("Ready.");
+
+      const state = await readJson(fixture.statePath);
+      const firstContainerId = String(state.lastContainerId);
+      expect(state.port).toBe(fixture.port);
+
+      const inspect = inspectContainer(fixture, firstContainerId);
+      expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, fixture.port)}`);
+      expect(inspect.Config?.Labels).toEqual(expect.objectContaining(state.labels));
+      expect(getPublishedHostPort(inspect, fixture.port)).toBe(String(fixture.port));
+
+      const sampleFileContent = await readFile(fixture.sampleFilePath, "utf8");
+      const sample = execInContainer(
+        fixture,
+        firstContainerId,
+        `cat ${quoteShell(path.posix.join(fixture.remoteWorkspaceFolder, "sample-file.txt"))}`,
+      );
+      expect(sample.stdout).toBe(sampleFileContent);
+
+      const featureChecks = execInContainer(
+        fixture,
+        firstContainerId,
+        "node --version >/dev/null && terraform version >/dev/null && az version >/dev/null && docker --version >/dev/null",
+      );
+      expect(featureChecks.exitCode).toBe(0);
+
+      expect(await readTrimmedFile(fixture.runnerArtifacts.ghToken)).toBe("ghs_live_example_token");
+      expect(await readTrimmedFile(fixture.runnerArtifacts.gitUserName)).toBe("Example Author");
+      expect(await readTrimmedFile(fixture.runnerArtifacts.gitUserEmail)).toBe("example@author.test");
+      expect(await readTrimmedFile(fixture.runnerArtifacts.sshAuthSock)).toBe(fixture.expectedContainerSshAuthSockPath);
+      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
+      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKeyPub)).toBe(`${fixture.runnerHostKeyMarker}.pub`);
+      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([String(fixture.port)]);
+
+      const ghTokenInContainer = execInContainer(fixture, firstContainerId, 'printf "%s" "${GH_TOKEN:-}"');
+      expect(ghTokenInContainer.stdout).toBe("ghs_live_example_token");
+
+      const gitUserNameInContainer = execInContainer(fixture, firstContainerId, "git config --global --get user.name");
+      expect(gitUserNameInContainer.stdout.trim()).toBe("Example Author");
+
+      const gitUserEmailInContainer = execInContainer(fixture, firstContainerId, "git config --global --get user.email");
+      expect(gitUserEmailInContainer.stdout.trim()).toBe("example@author.test");
+
+      const knownHostsInContainer = execInContainer(fixture, firstContainerId, "cat ~/.ssh/known_hosts");
+      expect(knownHostsInContainer.stdout).toBe(fixture.knownHostsContent);
+
+      const sshAuthSockInContainer = execInContainer(
+        fixture,
+        firstContainerId,
+        'printf "%s" "${SSH_AUTH_SOCK:-}" && test -S "${SSH_AUTH_SOCK:-/missing}"',
+      );
+      expect(sshAuthSockInContainer.exitCode).toBe(0);
+      expect(sshAuthSockInContainer.stdout).toBe(fixture.expectedContainerSshAuthSockPath);
+
+      const hostKeyInContainer = execInContainerAsRoot(fixture, firstContainerId, "cat /etc/ssh/ssh_host_devbox_test_key");
+      expect(hostKeyInContainer.stdout.trim()).toBe(fixture.runnerHostKeyMarker);
+
+      const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
+      expect(runnerCredContent).toContain(`port=${fixture.port}`);
+
+      const rebuild = runCli(fixture, ["rebuild"]);
+      expect(rebuild.exitCode).toBe(0);
+      expect(rebuild.stdout).toContain(`Using port ${fixture.port}.`);
+      expect(rebuild.stdout).toContain("Ready.");
+
+      const rebuiltState = await readJson(fixture.statePath);
+      const rebuiltContainerId = String(rebuiltState.lastContainerId);
+      expect(rebuiltState.port).toBe(fixture.port);
+      expect(rebuiltContainerId).not.toBe(firstContainerId);
+      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([
+        String(fixture.port),
+        String(fixture.port),
+      ]);
+
+      const restoredHostKey = execInContainerAsRoot(fixture, rebuiltContainerId, "cat /etc/ssh/ssh_host_devbox_test_key");
+      expect(restoredHostKey.stdout.trim()).toBe(fixture.runnerHostKeyMarker);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+      expect(down.stdout).toContain("Removed 1 managed container(s).");
+      expect(await listManagedContainerIds(fixture)).toEqual([]);
+      expect(existsSync(fixture.runnerCredPath)).toBe(true);
+      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
+      expect(existsSync(fixture.statePath)).toBe(false);
+    },
+    { timeout: 12 * 60_000 },
+  );
+});
+
+async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions = {}): Promise<LiveFixture> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-live-example-"));
+  tempPaths.push(tempDir);
+  const tempRoot = await realpath(tempDir);
+
+  const workspaceCopyPath = path.join(tempRoot, exampleName);
+  await cp(path.join(repoRoot, "examples", exampleName), workspaceCopyPath, { recursive: true });
+  await resetWorkspaceArtifacts(workspaceCopyPath);
+
+  runCommand(["git", "init", workspaceCopyPath]);
+  if (options.gitIdentity) {
+    runCommand(["git", "-C", workspaceCopyPath, "config", "user.name", options.gitIdentity.name]);
+  runCommand(["git", "-C", workspaceCopyPath, "config", "user.email", options.gitIdentity.email]);
+  }
+
+  const workspacePath = await realpath(workspaceCopyPath);
+  const homeDir = path.join(tempRoot, "home");
+  await mkdir(homeDir, { recursive: true });
+
+  if (options.knownHosts !== undefined) {
+    const sshDir = path.join(homeDir, ".ssh");
+    await mkdir(sshDir, { recursive: true });
+    await writeFile(path.join(sshDir, "known_hosts"), options.knownHosts, "utf8");
+  }
+
+  const forceNoDockerDesktopHostService = options.forceNoDockerDesktopHostService ?? !options.requireSshAuthSock;
+  const wrappersDir = path.join(tempRoot, "bin");
+  await createHostToolWrappers(wrappersDir, { forceNoDockerDesktopHostService });
+
+  const useDockerDesktopHostService = options.requireSshAuthSock && !forceNoDockerDesktopHostService && isDockerDesktopHost();
+
+  let sshAuthSockServer: Server | null = null;
+  let sshAuthSockPath: string | null = null;
+  if (options.requireSshAuthSock && !useDockerDesktopHostService) {
+    sshAuthSockPath = path.join(tempRoot, "ssh-auth.sock");
+    sshAuthSockServer = await startUnixSocketServer(sshAuthSockPath);
+  }
+
+  const remoteWorkspaceFolder = getDefaultRemoteWorkspaceFolder(workspacePath);
+  const runnerHostKeyMarker = `devbox-test-host-key-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const runnerScriptPath = path.join(workspacePath, ".devbox-test-runner.sh");
+  await writeFile(runnerScriptPath, buildFakeRunnerScript(runnerHostKeyMarker), "utf8");
+
+  const env = baseEnv();
+  env.DEVBOX_RUNNER_URL = `file://${path.posix.join(remoteWorkspaceFolder, ".devbox-test-runner.sh")}`;
+  env.DEVBOX_TEST_GH_TOKEN = options.ghToken ?? "";
+  env.HOME = homeDir;
+  env.PATH = `${wrappersDir}${path.delimiter}${env.PATH}`;
+  env.SSH_AUTH_SOCK = sshAuthSockPath ?? "";
+  env.XDG_STATE_HOME = path.join(tempRoot, "state");
+
+  const fixture: LiveFixture = {
+    env,
+    expectedContainerSshAuthSockPath: options.requireSshAuthSock
+      ? (useDockerDesktopHostService ? DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE : SSH_AUTH_SOCK_TARGET)
+      : null,
+    knownHostsContent: options.knownHosts ?? null,
+    port: await findAvailablePort(),
+    remoteWorkspaceFolder,
+    runnerArtifacts: {
+      ghToken: path.join(workspacePath, ".devbox-test-gh-token"),
+      gitUserEmail: path.join(workspacePath, ".devbox-test-git-user-email"),
+      gitUserName: path.join(workspacePath, ".devbox-test-git-user-name"),
+      hostKey: path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME, "ssh_host_devbox_test_key"),
+      hostKeyPub: path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME, "ssh_host_devbox_test_key.pub"),
+      knownHosts: path.join(workspacePath, ".devbox-test-known-hosts"),
+      runnerInvocations: path.join(workspacePath, ".devbox-test-runner-invocations"),
+      sshAuthSock: path.join(workspacePath, ".devbox-test-ssh-auth-sock"),
+    },
+    runnerCredPath: path.join(workspacePath, RUNNER_CRED_FILENAME),
+    runnerHostKeyMarker,
+    sampleFilePath: path.join(workspacePath, "sample-file.txt"),
+    sshAuthSockPath,
+    statePath: getStatePath(homeDir, workspacePath, env.XDG_STATE_HOME),
+    workspacePath,
+  };
+
+  cleanupTasks.push(async () => {
+    await forceDown(fixture);
+    if (sshAuthSockServer) {
+      await closeServer(sshAuthSockServer);
+    }
+  });
+
+  return fixture;
+}
+
+function runCli(fixture: LiveFixture, args: string[], allowFailure = false): CommandResult {
+  return runCommand([process.execPath, "run", cliPath, ...args], {
+    allowFailure,
+    cwd: fixture.workspacePath,
+    env: fixture.env,
+  });
+}
+
+function execInContainer(fixture: LiveFixture, containerId: string, script: string): CommandResult {
+  return runCommand(["devcontainer", "exec", "--container-id", containerId, "sh", "-lc", script], {
+    cwd: fixture.workspacePath,
+    env: fixture.env,
+  });
+}
+
+function execInContainerAsRoot(fixture: LiveFixture, containerId: string, script: string): CommandResult {
+  return runCommand(["docker", "exec", "--user", "root", containerId, "sh", "-lc", script], {
+    cwd: fixture.workspacePath,
+    env: fixture.env,
+  });
+}
+
+function inspectContainer(fixture: LiveFixture, containerId: string): DockerInspect {
+  const result = runCommand(["docker", "inspect", containerId], {
+    cwd: fixture.workspacePath,
+    env: fixture.env,
+  });
+  return (JSON.parse(result.stdout) as DockerInspect[])[0];
+}
+
+async function forceDown(fixture: LiveFixture): Promise<void> {
+  runCli(fixture, ["down"], true);
+
+  const containerIds = await listManagedContainerIds(fixture);
+  if (containerIds.length > 0) {
+    runCommand(["docker", "rm", "--force", ...containerIds], {
+      allowFailure: true,
+      cwd: fixture.workspacePath,
+      env: fixture.env,
+    });
+  }
+}
+
+async function listManagedContainerIds(fixture: LiveFixture): Promise<string[]> {
+  const result = runCommand(
+    [
+      "docker",
+      "ps",
+      "-aq",
+      "--filter",
+      `label=${MANAGED_LABEL_KEY}=true`,
+      "--filter",
+      `label=${WORKSPACE_LABEL_KEY}=${hashWorkspacePath(fixture.workspacePath)}`,
+    ],
+    {
+      allowFailure: true,
+      cwd: fixture.workspacePath,
+      env: fixture.env,
+    },
+  );
+
+  return result.stdout
+    .split(/\s+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function getPublishedHostPort(container: DockerInspect, port: number): string | undefined {
+  return container.NetworkSettings?.Ports?.[`${port}/tcp`]?.[0]?.HostPort;
+}
+
+function runCommand(
+  command: string[],
+  options?: {
+    allowFailure?: boolean;
+    cwd?: string;
+    env?: Record<string, string>;
+  },
+): CommandResult {
+  const result = Bun.spawnSync(command, {
+    cwd: options?.cwd,
+    env: options?.env,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const output: CommandResult = {
+    exitCode: result.exitCode ?? 1,
+    stderr: Buffer.from(result.stderr).toString("utf8"),
+    stdout: Buffer.from(result.stdout).toString("utf8"),
+  };
+
+  if (output.exitCode !== 0 && !options?.allowFailure) {
+    throw new Error(
+      `Command failed: ${command.join(" ")}\nstdout:\n${output.stdout || "<empty>"}\nstderr:\n${output.stderr || "<empty>"}`,
+    );
+  }
+
+  return output;
+}
+
+function canRunLivePrerequisites(): boolean {
+  return canRunCommand(["docker", "info"]) && canRunCommand(["devcontainer", "--version"]);
+}
+
+function isDockerDesktopHost(): boolean {
+  try {
+    const result = Bun.spawnSync(["docker", "info", "--format", "{{.OperatingSystem}}"], {
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+    if ((result.exitCode ?? 1) !== 0) {
+      return false;
+    }
+
+    return Buffer.from(result.stdout).toString("utf8").toLowerCase().includes("docker desktop");
+  } catch {
+    return false;
+  }
+}
+
+function canRunCommand(command: string[]): boolean {
+  try {
+    const result = Bun.spawnSync(command, {
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+    return (result.exitCode ?? 1) === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function resetWorkspaceArtifacts(workspacePath: string): Promise<void> {
+  await rm(path.join(workspacePath, RUNNER_CRED_FILENAME), { force: true });
+  await rm(path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME), { force: true, recursive: true });
+  await rm(path.join(workspacePath, ".devcontainer", ".devcontainer.json"), { force: true });
+}
+
+async function createHostToolWrappers(
+  wrappersDir: string,
+  options: { forceNoDockerDesktopHostService: boolean },
+): Promise<void> {
+  await mkdir(wrappersDir, { recursive: true });
+
+  if (options.forceNoDockerDesktopHostService) {
+    const realDockerPath = findExecutable("docker");
+    if (!realDockerPath) {
+      throw new Error("docker was not found in PATH.");
+    }
+
+    const dockerWrapperPath = path.join(wrappersDir, "docker");
+    await writeFile(
+      dockerWrapperPath,
+      `#!/bin/sh
+if [ "$1" = "info" ] && [ "$2" = "--format" ] && [ "$3" = "{{.OperatingSystem}}" ]; then
+  printf '%s\\n' 'Docker Engine'
+  exit 0
+fi
+exec ${quoteShell(realDockerPath)} "$@"
+`,
+      "utf8",
+    );
+    await chmod(dockerWrapperPath, 0o755);
+  }
+
+  const ghWrapperPath = path.join(wrappersDir, "gh");
+  await writeFile(
+    ghWrapperPath,
+    `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "token" ]; then
+  if [ -n "\${DEVBOX_TEST_GH_TOKEN:-}" ]; then
+    printf '%s\\n' "$DEVBOX_TEST_GH_TOKEN"
+    exit 0
+  fi
+
+  printf '%s\\n' 'Run gh auth login to authenticate.' >&2
+  exit 1
+fi
+
+printf '%s\\n' 'Unsupported gh command for live example tests.' >&2
+exit 1
+`,
+    "utf8",
+  );
+  await chmod(ghWrapperPath, 0o755);
+}
+
+function buildFakeRunnerScript(hostKeyMarker: string): string {
+  return `#!/usr/bin/env bash
+set -euo pipefail
+
+workspace_root="$(dirname "$CRED_FILE")"
+printf '%s\\n' "$SSH_PORT" >> "$workspace_root/.devbox-test-runner-invocations"
+
+if [ -n "\${GH_TOKEN:-}" ]; then
+  printf '%s\\n' "$GH_TOKEN" > "$workspace_root/.devbox-test-gh-token"
+fi
+
+git_user_name=""
+git_user_email=""
+if command -v git >/dev/null 2>&1; then
+  git_user_name="$(git config --global --get user.name 2>/dev/null || true)"
+  git_user_email="$(git config --global --get user.email 2>/dev/null || true)"
+fi
+
+if [ -n "$git_user_name" ]; then
+  printf '%s\\n' "$git_user_name" > "$workspace_root/.devbox-test-git-user-name"
+fi
+
+if [ -n "$git_user_email" ]; then
+  printf '%s\\n' "$git_user_email" > "$workspace_root/.devbox-test-git-user-email"
+fi
+
+if [ -f "$HOME/.ssh/known_hosts" ]; then
+  cp "$HOME/.ssh/known_hosts" "$workspace_root/.devbox-test-known-hosts"
+fi
+
+if [ -n "\${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+  printf '%s\\n' "$SSH_AUTH_SOCK" > "$workspace_root/.devbox-test-ssh-auth-sock"
+else
+  printf '%s\\n' 'missing' > "$workspace_root/.devbox-test-ssh-auth-sock"
+fi
+
+printf 'user=root\\npass=password\\nport=%s\\n' "$SSH_PORT" > "$CRED_FILE"
+
+root_script="mkdir -p /etc/ssh && if [ ! -f /etc/ssh/ssh_host_devbox_test_key ]; then printf '%s\\\\n' '${hostKeyMarker}' > /etc/ssh/ssh_host_devbox_test_key && chmod 600 /etc/ssh/ssh_host_devbox_test_key; fi && if [ ! -f /etc/ssh/ssh_host_devbox_test_key.pub ]; then printf '%s\\\\n' '${hostKeyMarker}.pub' > /etc/ssh/ssh_host_devbox_test_key.pub && chmod 644 /etc/ssh/ssh_host_devbox_test_key.pub; fi"
+if [ "$(id -u)" -eq 0 ]; then
+  sh -lc "$root_script"
+else
+  sudo sh -lc "$root_script"
+fi
+
+printf 'SSH user: root\\nSSH pass: password\\nSSH port: %s\\nPermitRootLogin: yes\\n' "$SSH_PORT"
+`;
+}
+
+async function startUnixSocketServer(socketPath: string): Promise<Server> {
+  const server = createServer((socket) => {
+    socket.end();
+  });
+
+  return await new Promise<Server>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.off("error", reject);
+      resolve(server);
+    });
+  });
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+async function findAvailablePort(): Promise<number> {
+  const server = createServer();
+  return await new Promise<number>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Could not determine an ephemeral port."));
+        return;
+      }
+
+      const selectedPort = address.port;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(selectedPort);
+      });
+    });
+  });
+}
+
+function baseEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+
+  return env;
+}
+
+function getStatePath(homeDir: string, workspacePath: string, xdgStateHome?: string): string {
+  return path.join(getStateRoot(homeDir, xdgStateHome), "workspaces", hashWorkspacePath(workspacePath), "state.json");
+}
+
+function getStateRoot(homeDir: string, xdgStateHome?: string): string {
+  if (process.platform === "darwin") {
+    return path.join(homeDir, "Library", "Application Support", CLI_NAME);
+  }
+
+  if (xdgStateHome) {
+    return path.join(xdgStateHome, CLI_NAME);
+  }
+
+  return path.join(homeDir, ".local", "state", CLI_NAME);
+}
+
+function findExecutable(command: string): string | null {
+  const pathValue = process.env.PATH ?? "";
+  for (const directory of pathValue.split(path.delimiter)) {
+    if (!directory) {
+      continue;
+    }
+
+    const candidate = path.join(directory, command);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function readJson(filePath: string): Promise<any> {
+  return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+async function readTrimmedFile(filePath: string): Promise<string> {
+  return (await readFile(filePath, "utf8")).trim();
+}
+
+async function readLines(filePath: string): Promise<string[]> {
+  const content = await readFile(filePath, "utf8");
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
