@@ -6,6 +6,7 @@ import {
   createWorkspaceState,
   deleteWorkspaceState,
   discoverDevcontainerConfig,
+  formatReadyMessage,
   getDefaultRemoteWorkspaceFolder,
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
@@ -207,7 +208,7 @@ async function handleUpLike(
     }),
   );
 
-  console.log(`\nReady. ${upResult.containerId.slice(0, 12)} is available on port ${port}.`);
+  console.log(formatReadyMessage(upResult.containerId, port, remoteWorkspaceFolder));
   if (!preparedKnownHosts.knownHostsPath || knownHostsCopyResult !== "copied") {
     console.log("Host known_hosts was unavailable for injection, so only SSH agent sharing was configured.");
   }

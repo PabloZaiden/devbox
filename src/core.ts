@@ -253,6 +253,10 @@ export function getDefaultRemoteWorkspaceFolder(workspacePath: string): string {
   return path.posix.join("/workspaces", path.basename(workspacePath));
 }
 
+export function formatReadyMessage(containerId: string, port: number, remoteWorkspaceFolder: string): string {
+  return `\nReady. ${containerId.slice(0, 12)} is available on port ${port}.\nProject root inside the container: ${remoteWorkspaceFolder}`;
+}
+
 export function getManagedContainerName(workspacePath: string, port: number): string {
   const projectName = path.basename(workspacePath);
   const normalized = projectName

@@ -6,6 +6,7 @@ import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import {
   buildManagedConfig,
   discoverDevcontainerConfig,
+  formatReadyMessage,
   getDefaultRemoteWorkspaceFolder,
   getContainerSshAuthSockPath,
   getGeneratedConfigPath,
@@ -377,5 +378,21 @@ describe("paths and labels", () => {
       "devbox.managed": "true",
       "devbox.workspace": "hash123",
     });
+  });
+});
+
+describe("formatReadyMessage", () => {
+  test("includes the default /workspaces project root in the final message", () => {
+    const remoteWorkspaceFolder = getDefaultRemoteWorkspaceFolder("/tmp/ws/example-project");
+
+    expect(formatReadyMessage("1234567890abcdef", 5001, remoteWorkspaceFolder)).toBe(
+      "\nReady. 1234567890ab is available on port 5001.\nProject root inside the container: /workspaces/example-project",
+    );
+  });
+
+  test("includes an explicit remote workspace folder from the devcontainer result", () => {
+    expect(formatReadyMessage("abcdef1234567890", 6000, "/workspace/custom-root")).toBe(
+      "\nReady. abcdef123456 is available on port 6000.\nProject root inside the container: /workspace/custom-root",
+    );
   });
 });
