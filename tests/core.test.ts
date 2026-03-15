@@ -177,6 +177,7 @@ describe("buildManagedConfig", () => {
       containerName: "devbox-example-5001",
       sshAuthSock: "/tmp/agent.sock",
       knownHostsPath: "/tmp/known_hosts",
+      githubTokenAvailable: true,
     });
 
     expect(managed.runArgs).toEqual(["--init", "--name", "devbox-example-5001", "-p", "5001:5001"]);
@@ -187,6 +188,7 @@ describe("buildManagedConfig", () => {
     ]);
     expect(managed.containerEnv).toEqual({
       FOO: "bar",
+      GH_TOKEN: "${localEnv:GH_TOKEN}",
       SSH_AUTH_SOCK: "/tmp/devbox-ssh-auth.sock",
     });
   });
@@ -205,6 +207,7 @@ describe("buildManagedConfig", () => {
         containerName: "devbox-example-5001",
         sshAuthSock: null,
         knownHostsPath: null,
+        githubTokenAvailable: false,
       },
     );
 
@@ -224,6 +227,7 @@ describe("buildManagedConfig", () => {
         containerName: "devbox-example-5001",
         sshAuthSock: DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
         knownHostsPath: null,
+        githubTokenAvailable: false,
       },
     );
 
@@ -246,10 +250,29 @@ describe("buildManagedConfig", () => {
         containerName: "devbox-example-5001",
         sshAuthSock: "/tmp/agent.sock",
         knownHostsPath: null,
+        githubTokenAvailable: false,
       },
     );
 
     expect(managed.runArgs).toEqual(["-p", "5001:5001", "--name", "devbox-example-5001"]);
+  });
+
+  test("stores a localEnv placeholder instead of a persisted github token value", () => {
+    const managed = buildManagedConfig(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      },
+      {
+        port: 5001,
+        containerName: "devbox-example-5001",
+        sshAuthSock: null,
+        knownHostsPath: null,
+        githubTokenAvailable: true,
+      },
+    );
+
+    expect(JSON.stringify(managed)).toContain('"GH_TOKEN":"${localEnv:GH_TOKEN}"');
+    expect(JSON.stringify(managed)).not.toContain("ghp_");
   });
 });
 

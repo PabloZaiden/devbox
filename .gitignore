@@ -3,3 +3,4 @@ dist/
 coverage/
 .sshcred
 .devbox-ssh-host-keys/
+.planning/

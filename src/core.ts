@@ -37,6 +37,7 @@ export interface ManagedConfigOptions {
   containerName: string;
   sshAuthSock: string | null;
   knownHostsPath: string | null;
+  githubTokenAvailable?: boolean;
 }
 
 export interface WorkspaceState {
@@ -420,6 +421,9 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
   const containerEnv = getStringRecord(managedConfig.containerEnv, "containerEnv");
   if (containerSshAuthSock) {
     containerEnv.SSH_AUTH_SOCK = containerSshAuthSock;
+  }
+  if (options.githubTokenAvailable) {
+    containerEnv.GH_TOKEN = "${localEnv:GH_TOKEN}";
   }
   managedConfig.containerEnv = containerEnv;
 

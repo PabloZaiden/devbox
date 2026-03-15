@@ -15,7 +15,10 @@ import {
   getRunnerHostKeysDir,
   getRunnerSummaryLines,
   isExecutableAvailable,
+  looksLikeGhUnauthenticatedError,
+  redactSensitiveOutput,
   resolveShellContainerId,
+  resolveGhCliToken,
   requiresSshAuthSockPermissionFix,
   resolveSshAuthSockSource,
 } from "../src/runtime";
@@ -230,6 +233,64 @@ describe("buildConfigureGitIdentityScript", () => {
   });
 });
 
+describe("resolveGhCliToken", () => {
+  test("returns null when gh is unavailable", () => {
+    expect(resolveGhCliToken({ ghAvailable: false })).toEqual({ token: null });
+  });
+
+  test("returns a trimmed token when gh auth token succeeds", () => {
+    expect(resolveGhCliToken({ ghAvailable: true, exitCode: 0, stdout: "  secret-token  \n" })).toEqual({
+      token: "secret-token",
+    });
+  });
+
+  test("treats unauthenticated gh output as an optional no-op", () => {
+    expect(
+      resolveGhCliToken({
+        ghAvailable: true,
+        exitCode: 1,
+        stderr: "You are not logged into any hosts. Run gh auth login to authenticate.",
+      }),
+    ).toEqual({ token: null });
+  });
+
+  test("returns a safe warning for unexpected gh failures", () => {
+    expect(
+      resolveGhCliToken({
+        ghAvailable: true,
+        exitCode: 1,
+        stderr: "transport error",
+      }),
+    ).toEqual({
+      token: null,
+      warning: "GitHub CLI auth token lookup failed. Continuing without GH_TOKEN injection.",
+    });
+  });
+
+  test("returns a safe warning when gh succeeds without a token", () => {
+    expect(resolveGhCliToken({ ghAvailable: true, exitCode: 0, stdout: " \n" })).toEqual({
+      token: null,
+      warning: "GitHub CLI returned an empty auth token. Continuing without GH_TOKEN injection.",
+    });
+  });
+});
+
+describe("looksLikeGhUnauthenticatedError", () => {
+  test("recognizes common gh authentication prompts", () => {
+    expect(looksLikeGhUnauthenticatedError("Run gh auth login to authenticate.")).toBe(true);
+    expect(looksLikeGhUnauthenticatedError("authentication required")).toBe(true);
+    expect(looksLikeGhUnauthenticatedError("network timeout")).toBe(false);
+  });
+});
+
+describe("redactSensitiveOutput", () => {
+  test("redacts GH_TOKEN values from plain text and JSON-like output", () => {
+    expect(redactSensitiveOutput("GH_TOKEN=secret-value")).toBe("GH_TOKEN=<redacted>");
+    expect(redactSensitiveOutput('{"GH_TOKEN":"secret-value"}')).toBe('{"GH_TOKEN":"<redacted>"}');
+    expect(redactSensitiveOutput("GH_TOKEN: secret-value")).toBe("GH_TOKEN: <redacted>");
+  });
+});
+
 describe("getRunnerCredFile", () => {
   test("stores runner credentials on the mounted workspace", () => {
     expect(getRunnerCredFile("/workspaces/example-project")).toBe(
@@ -333,6 +394,13 @@ describe("formatDevcontainerProgressLine", () => {
       formatDevcontainerProgressLine("bash: cannot set terminal process group (-1): Inappropriate ioctl for device"),
     ).toBeNull();
     expect(formatDevcontainerProgressLine("bash: no job control in this shell")).toBeNull();
+  });
+
+  test("redacts GH_TOKEN values in surfaced progress output", () => {
+    expect(formatDevcontainerProgressLine("GH_TOKEN=secret-value")).toBe("GH_TOKEN=<redacted>");
+    expect(formatDevcontainerProgressLine('{"type":"text","level":1,"text":"GH_TOKEN=secret-value"}')).toBe(
+      "GH_TOKEN=<redacted>",
+    );
   });
 });
 

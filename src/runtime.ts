@@ -52,6 +52,13 @@ interface ResolvedSshAuthSock {
 export interface ResolvedHostEnvironment extends ResolvedSshAuthSock {
   gitUserName: string | null;
   gitUserEmail: string | null;
+  githubToken: string | null;
+  githubTokenWarning?: string;
+}
+
+export interface ResolvedGhCliToken {
+  token: string | null;
+  warning?: string;
 }
 
 export function isExecutableAvailable(command: string): boolean {
@@ -82,7 +89,7 @@ export function getRunnerSummaryLines(output: string): string[] {
 }
 
 export function formatDevcontainerProgressLine(line: string): string | null {
-  const cleaned = stripAnsi(line).trim();
+  const cleaned = redactSensitiveOutput(stripAnsi(line)).trim();
   if (!cleaned) {
     return null;
   }
@@ -110,7 +117,7 @@ export function formatDevcontainerProgressLine(line: string): string | null {
     }
 
     if (text.startsWith("Error:")) {
-      return text;
+      return redactSensitiveOutput(text);
     }
 
     if (type === "start") {
@@ -307,10 +314,11 @@ export async function ensureHostEnvironment(options: {
 
   const hostEnvSshAuthSock = process.env.SSH_AUTH_SOCK?.trim() || undefined;
   const hostEnvSockExists = hostEnvSshAuthSock ? await pathExists(hostEnvSshAuthSock) : false;
-  const [dockerDesktopHostServiceAvailable, gitUserName, gitUserEmail] = await Promise.all([
+  const [dockerDesktopHostServiceAvailable, gitUserName, gitUserEmail, ghCliToken] = await Promise.all([
     hasDockerDesktopHostService(),
     tryGetGitConfig(options.workspacePath, "user.name"),
     tryGetGitConfig(options.workspacePath, "user.email"),
+    tryGetGhCliToken(),
   ]);
 
   return {
@@ -322,6 +330,8 @@ export async function ensureHostEnvironment(options: {
     }),
     gitUserName,
     gitUserEmail,
+    githubToken: ghCliToken.token,
+    githubTokenWarning: ghCliToken.warning,
   };
 }
 
@@ -422,6 +432,7 @@ export async function devcontainerUp(input: {
   generatedConfigPath: string;
   userDataDir: string;
   labels: Record<string, string>;
+  processEnv?: Record<string, string | undefined>;
 }): Promise<UpResult> {
   await mkdir(input.userDataDir, { recursive: true });
 
@@ -445,6 +456,7 @@ export async function devcontainerUp(input: {
   }
 
   const result = await execute(args, {
+    env: input.processEnv,
     stdoutMode: "devcontainer-json",
     stderrMode: "devcontainer-json",
   });
@@ -674,6 +686,66 @@ async function tryGetGitConfig(workspacePath: string, key: "user.name" | "user.e
   return trimmed.length > 0 ? trimmed : null;
 }
 
+export function resolveGhCliToken(input: {
+  ghAvailable: boolean;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+}): ResolvedGhCliToken {
+  if (!input.ghAvailable) {
+    return { token: null };
+  }
+
+  const token = input.stdout?.trim() ?? "";
+  if (input.exitCode === 0) {
+    if (token.length > 0) {
+      return { token };
+    }
+
+    return {
+      token: null,
+      warning: "GitHub CLI returned an empty auth token. Continuing without GH_TOKEN injection.",
+    };
+  }
+
+  if (looksLikeGhUnauthenticatedError(input.stderr ?? "")) {
+    return { token: null };
+  }
+
+  return {
+    token: null,
+    warning: "GitHub CLI auth token lookup failed. Continuing without GH_TOKEN injection.",
+  };
+}
+
+export function looksLikeGhUnauthenticatedError(stderr: string): boolean {
+  const normalized = stderr.toLowerCase();
+  return (
+    normalized.includes("not logged into any hosts") ||
+    normalized.includes("authentication required") ||
+    normalized.includes("run gh auth login")
+  );
+}
+
+async function tryGetGhCliToken(): Promise<ResolvedGhCliToken> {
+  if (!isExecutableAvailable("gh")) {
+    return { token: null };
+  }
+
+  const result = await execute(["gh", "auth", "token"], {
+    stdoutMode: "capture",
+    stderrMode: "capture",
+    allowFailure: true,
+  });
+
+  return resolveGhCliToken({
+    ghAvailable: true,
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  });
+}
+
 async function findListeningPids(port: number): Promise<string[]> {
   if (isExecutableAvailable("lsof")) {
     const result = await execute(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
@@ -876,13 +948,20 @@ export function isCommandError(error: unknown): error is CommandError {
 export function formatCommandError(error: CommandError): string {
   const stderr = error.result.stderr.trim();
   const stdout = error.result.stdout.trim();
-  const details = stderr || stdout;
+  const details = isGhAuthTokenCommand(error.command) ? "<redacted>" : redactSensitiveOutput(stderr || stdout);
 
   if (!details) {
     return `${error.message} (exit ${error.result.exitCode})`;
   }
 
   return `${error.message}\n${details}`;
+}
+
+export function redactSensitiveOutput(text: string): string {
+  return text
+    .replace(/(\bGH_TOKEN=)([^\s"'`]+)/g, "$1<redacted>")
+    .replace(/("GH_TOKEN"\s*:\s*")([^"]*)(")/g, '$1<redacted>$3')
+    .replace(/(\bGH_TOKEN:\s*)(\S+)/g, "$1<redacted>");
 }
 
 function stripAnsi(text: string): string {
@@ -910,7 +989,11 @@ function looksLikeDevcontainerUserEnvProbeDump(text: string): boolean {
     return false;
   }
 
-  return /\b(?:HOME|HOSTNAME|PATH|PWD|SHLVL|SSH_AUTH_SOCK|USER)=/.test(match[2]);
+  return /\b(?:GH_TOKEN|HOME|HOSTNAME|PATH|PWD|SHLVL|SSH_AUTH_SOCK|USER)=/.test(match[2]);
+}
+
+function isGhAuthTokenCommand(command: string[]): boolean {
+  return command[0] === "gh" && command[1] === "auth" && command[2] === "token";
 }
 
 export function labelsForWorkspaceHash(workspaceHash: string): Record<string, string> {
