@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -325,7 +325,6 @@ describe("ensurePathIgnored", () => {
     tempPaths.push(tempDir);
     const repoDir = path.join(tempDir, "repo");
     const worktreeDir = path.join(tempDir, "worktree");
-    const targetPath = path.join(worktreeDir, ".devcontainer", ".devcontainer.json");
 
     const run = (cmd: string[], cwd?: string) => {
       const result = Bun.spawnSync(cmd, {
@@ -346,12 +345,14 @@ describe("ensurePathIgnored", () => {
     run(["git", "-C", repoDir, "commit", "-m", "init"]);
     run(["git", "-C", repoDir, "worktree", "add", worktreeDir]);
 
+    const canonicalWorktreeDir = await realpath(worktreeDir);
+    const targetPath = path.join(canonicalWorktreeDir, ".devcontainer", ".devcontainer.json");
     await mkdir(path.dirname(targetPath), { recursive: true });
     await writeFile(targetPath, "{}\n", "utf8");
-    await ensurePathIgnored(worktreeDir, targetPath);
+    await ensurePathIgnored(canonicalWorktreeDir, targetPath);
 
     const excludePathResult = Bun.spawnSync(
-      ["git", "-C", worktreeDir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
+      ["git", "-C", canonicalWorktreeDir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
       { stdout: "pipe", stderr: "pipe" },
     );
     expect(excludePathResult.exitCode).toBe(0);
