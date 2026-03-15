@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { access, chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
@@ -467,31 +467,67 @@ export async function prepareKnownHostsMount(input: {
 
   try {
     await access(candidate);
-  } catch {
-    return { knownHostsPath: null };
-  }
-
-  const details = await stat(candidate);
-  if (!details.isFile()) {
+  } catch (error) {
     return {
       knownHostsPath: null,
-      warning: `Host known_hosts is not a regular file and was skipped: ${candidate}.`,
+      warning: buildKnownHostsAccessWarning(candidate, error),
     };
   }
 
-  const content = await readFile(candidate, "utf8");
-  if (content.trim().length === 0) {
+  try {
+    const details = await lstat(candidate);
+    if (details.isSymbolicLink()) {
+      return {
+        knownHostsPath: null,
+        warning: `Host known_hosts is a symbolic link and was skipped: ${candidate}.`,
+      };
+    }
+    if (!details.isFile()) {
+      return {
+        knownHostsPath: null,
+        warning: `Host known_hosts is not a regular file and was skipped: ${candidate}.`,
+      };
+    }
+
+    const content = await readFile(candidate, "utf8");
+    if (content.trim().length === 0) {
+      return {
+        knownHostsPath: null,
+        warning: `Host known_hosts is empty and was skipped: ${candidate}.`,
+      };
+    }
+
+    await mkdir(input.userDataDir, { recursive: true });
+    const snapshotPath = path.join(input.userDataDir, KNOWN_HOSTS_SNAPSHOT_FILENAME);
+    await writeFile(snapshotPath, content, "utf8");
+    await chmod(snapshotPath, 0o600);
+    return { knownHostsPath: snapshotPath };
+  } catch (error) {
     return {
       knownHostsPath: null,
-      warning: `Host known_hosts is empty and was skipped: ${candidate}.`,
+      warning: `Host known_hosts could not be staged and was skipped: ${candidate} (${formatErrorMessage(error)}).`,
     };
   }
+}
 
-  await mkdir(input.userDataDir, { recursive: true });
-  const snapshotPath = path.join(input.userDataDir, KNOWN_HOSTS_SNAPSHOT_FILENAME);
-  await writeFile(snapshotPath, content, "utf8");
-  await chmod(snapshotPath, 0o600);
-  return { knownHostsPath: snapshotPath };
+function buildKnownHostsAccessWarning(candidate: string, error: unknown): string {
+  const code = getErrorCode(error);
+  if (code === "ENOENT") {
+    return `Host known_hosts was not found and was skipped: ${candidate}.`;
+  }
+  return `Host known_hosts could not be read and was skipped: ${candidate} (${formatErrorMessage(error)}).`;
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export function quoteShell(value: string): string {

@@ -119,9 +119,9 @@ describe("buildCopyKnownHostsScript", () => {
     expect(script).toContain("if [ ! -e '/tmp/devbox-known_hosts' ]; then");
     expect(script).toContain("elif [ ! -f '/tmp/devbox-known_hosts' ]; then");
     expect(script).toContain("elif [ ! -s '/tmp/devbox-known_hosts' ]; then");
-    expect(script).toContain("mkdir -p ~/.ssh");
-    expect(script).toContain("cp '/tmp/devbox-known_hosts' ~/.ssh/known_hosts");
+    expect(script).toContain("if mkdir -p ~/.ssh && cp '/tmp/devbox-known_hosts' ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; then");
     expect(script).toContain("printf '%s\\n' 'copied'");
+    expect(script).toContain("exit 1");
   });
 });
 

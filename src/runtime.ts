@@ -276,10 +276,11 @@ export function buildCopyKnownHostsScript(): string {
     "  printf '%s\\n' 'empty'",
     "else",
     "  umask 077",
-    "  mkdir -p ~/.ssh",
-    `  cp ${quoteShell(KNOWN_HOSTS_TARGET)} ~/.ssh/known_hosts`,
-    "  chmod 600 ~/.ssh/known_hosts",
-    "  printf '%s\\n' 'copied'",
+    `  if mkdir -p ~/.ssh && cp ${quoteShell(KNOWN_HOSTS_TARGET)} ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; then`,
+    "    printf '%s\\n' 'copied'",
+    "  else",
+    "    exit 1",
+    "  fi",
     "fi",
   ].join("\n");
 }
