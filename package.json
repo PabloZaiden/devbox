@@ -1,0 +1,21 @@
+{
+  "name": "expose-devcontainer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bun CLI to run and expose a devcontainer with SSH agent sharing and a forwarded ssh-server-runner port.",
+  "bin": {
+    "devbox": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "bun build --compile --outfile dist/devbox src/cli.ts",
+    "dev": "bun run src/cli.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

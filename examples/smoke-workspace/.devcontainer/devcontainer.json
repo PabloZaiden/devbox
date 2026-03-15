@@ -1,0 +1,4 @@
+{
+  "name": "devbox-smoke-workspace",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu"
+}
