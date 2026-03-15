@@ -27,6 +27,7 @@ import {
 import {
   assertConfiguredSshAuthSockAvailable,
   assertPortAvailable,
+  configureGitIdentity,
   copyKnownHosts,
   devcontainerUp,
   ensureSshAuthSockAccessible,
@@ -81,7 +82,7 @@ async function handleUpLike(
   allowMissingSsh: boolean,
   devcontainerSubpath: string | undefined,
 ): Promise<void> {
-  const environment = await ensureHostEnvironment({ allowMissingSsh });
+  const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
   const port = resolvePort(command, explicitPort, state);
   const knownHostsPath = await getKnownHostsPath();
   const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
@@ -153,6 +154,10 @@ async function handleUpLike(
     await assertConfiguredSshAuthSockAvailable(upResult.containerId);
   }
   await copyKnownHosts(upResult.containerId);
+  if (environment.gitUserName || environment.gitUserEmail) {
+    console.log("Syncing Git author identity from the host into the devcontainer...");
+    await configureGitIdentity(upResult.containerId, environment.gitUserName, environment.gitUserEmail);
+  }
   await stopManagedSshd(upResult.containerId);
   await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
   console.log("Installing and starting the SSH server inside the container (first run can take a bit)...");

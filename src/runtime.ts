@@ -44,9 +44,14 @@ interface ExecOptions {
   allowFailure?: boolean;
 }
 
-export interface ResolvedHostEnvironment {
+interface ResolvedSshAuthSock {
   sshAuthSock: string | null;
   warning?: string;
+}
+
+export interface ResolvedHostEnvironment extends ResolvedSshAuthSock {
+  gitUserName: string | null;
+  gitUserEmail: string | null;
 }
 
 export function isExecutableAvailable(command: string): boolean {
@@ -179,6 +184,42 @@ export function buildAssertConfiguredSshAuthSockScript(): string {
   ].join("\n");
 }
 
+export function buildConfigureGitIdentityScript(input: {
+  gitUserName: string | null;
+  gitUserEmail: string | null;
+}): string | null {
+  const commands: string[] = [];
+
+  if (input.gitUserName) {
+    commands.push(
+      'current_git_user_name="$(git config --global --get user.name 2>/dev/null || true)"',
+      'if [ -z "$current_git_user_name" ]; then',
+      `  git config --global user.name ${quoteShell(input.gitUserName)}`,
+      "fi",
+    );
+  }
+
+  if (input.gitUserEmail) {
+    commands.push(
+      'current_git_user_email="$(git config --global --get user.email 2>/dev/null || true)"',
+      'if [ -z "$current_git_user_email" ]; then',
+      `  git config --global user.email ${quoteShell(input.gitUserEmail)}`,
+      "fi",
+    );
+  }
+
+  if (commands.length === 0) {
+    return null;
+  }
+
+  return [
+    "if ! command -v git >/dev/null 2>&1; then",
+    "  exit 0",
+    "fi",
+    ...commands,
+  ].join("\n");
+}
+
 export function buildInteractiveShellScript(): string {
   return [
     "if command -v bash >/dev/null 2>&1; then",
@@ -223,7 +264,7 @@ export function resolveSshAuthSockSource(input: {
   hostEnvSockExists: boolean;
   dockerDesktopHostServiceAvailable: boolean;
   allowMissingSsh: boolean;
-}): ResolvedHostEnvironment {
+}): ResolvedSshAuthSock {
   const hostEnvSshAuthSock = input.hostEnvSshAuthSock?.trim() || undefined;
 
   if (input.dockerDesktopHostServiceAvailable) {
@@ -250,6 +291,7 @@ export function resolveSshAuthSockSource(input: {
 
 export async function ensureHostEnvironment(options: {
   allowMissingSsh: boolean;
+  workspacePath: string;
 }): Promise<ResolvedHostEnvironment> {
   if (process.platform !== "darwin" && process.platform !== "linux") {
     throw new UserError(`Unsupported platform: ${process.platform}. macOS and Linux are supported in v1.`);
@@ -265,14 +307,22 @@ export async function ensureHostEnvironment(options: {
 
   const hostEnvSshAuthSock = process.env.SSH_AUTH_SOCK?.trim() || undefined;
   const hostEnvSockExists = hostEnvSshAuthSock ? await pathExists(hostEnvSshAuthSock) : false;
-  const dockerDesktopHostServiceAvailable = await hasDockerDesktopHostService();
+  const [dockerDesktopHostServiceAvailable, gitUserName, gitUserEmail] = await Promise.all([
+    hasDockerDesktopHostService(),
+    tryGetGitConfig(options.workspacePath, "user.name"),
+    tryGetGitConfig(options.workspacePath, "user.email"),
+  ]);
 
-  return resolveSshAuthSockSource({
-    hostEnvSshAuthSock,
-    hostEnvSockExists,
-    dockerDesktopHostServiceAvailable,
-    allowMissingSsh: options.allowMissingSsh,
-  });
+  return {
+    ...resolveSshAuthSockSource({
+      hostEnvSshAuthSock,
+      hostEnvSockExists,
+      dockerDesktopHostServiceAvailable,
+      allowMissingSsh: options.allowMissingSsh,
+    }),
+    gitUserName,
+    gitUserEmail,
+  };
 }
 
 export async function ensureGeneratedConfigIgnored(
@@ -409,6 +459,19 @@ export async function devcontainerUp(input: {
 
 export async function copyKnownHosts(containerId: string): Promise<void> {
   const script = `if [ -f ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then umask 077 && mkdir -p ~/.ssh && cp ${quoteShell(KNOWN_HOSTS_TARGET)} ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; fi`;
+  await devcontainerExec(containerId, script, { quiet: true });
+}
+
+export async function configureGitIdentity(
+  containerId: string,
+  gitUserName: string | null,
+  gitUserEmail: string | null,
+): Promise<void> {
+  const script = buildConfigureGitIdentityScript({ gitUserName, gitUserEmail });
+  if (!script) {
+    return;
+  }
+
   await devcontainerExec(containerId, script, { quiet: true });
 }
 
@@ -589,6 +652,26 @@ async function tryGetGitTopLevel(workspacePath: string): Promise<string | null> 
   } catch {
     return null;
   }
+}
+
+async function tryGetGitConfig(workspacePath: string, key: "user.name" | "user.email"): Promise<string | null> {
+  if (!isExecutableAvailable("git")) {
+    return null;
+  }
+
+  const result = await execute(["git", "config", "--get", key], {
+    cwd: workspacePath,
+    stdoutMode: "capture",
+    stderrMode: "capture",
+    allowFailure: true,
+  });
+
+  if (result.exitCode !== 0) {
+    return null;
+  }
+
+  const trimmed = result.stdout.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 async function findListeningPids(port: number): Promise<string[]> {

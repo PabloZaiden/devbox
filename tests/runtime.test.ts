@@ -3,6 +3,7 @@ import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import type { DockerInspect } from "../src/core";
 import {
   buildAssertConfiguredSshAuthSockScript,
+  buildConfigureGitIdentityScript,
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
   buildInteractiveShellScript,
@@ -180,6 +181,52 @@ describe("Docker Desktop SSH socket fix", () => {
     expect(buildAssertConfiguredSshAuthSockScript()).toContain(
       "Run devbox rebuild to refresh SSH agent sharing.",
     );
+  });
+});
+
+describe("buildConfigureGitIdentityScript", () => {
+  test("returns null when the host has no git identity to copy", () => {
+    expect(
+      buildConfigureGitIdentityScript({
+        gitUserName: null,
+        gitUserEmail: null,
+      }),
+    ).toBeNull();
+  });
+
+  test("fills in missing container git config without overwriting existing values", () => {
+    const script = buildConfigureGitIdentityScript({
+      gitUserName: "Pablo O'Brian",
+      gitUserEmail: "pablo+dev@example.com",
+    });
+
+    expect(script).not.toBeNull();
+    if (!script) {
+      return;
+    }
+
+    expect(script).toContain("if ! command -v git >/dev/null 2>&1; then");
+    expect(script).toContain('current_git_user_name="$(git config --global --get user.name 2>/dev/null || true)"');
+    expect(script).toContain('if [ -z "$current_git_user_name" ]; then');
+    expect(script).toContain(`git config --global user.name 'Pablo O'"'"'Brian'`);
+    expect(script).toContain('current_git_user_email="$(git config --global --get user.email 2>/dev/null || true)"');
+    expect(script).toContain('if [ -z "$current_git_user_email" ]; then');
+    expect(script).toContain("git config --global user.email 'pablo+dev@example.com'");
+  });
+
+  test("only configures host values that are available", () => {
+    const script = buildConfigureGitIdentityScript({
+      gitUserName: null,
+      gitUserEmail: "pablo+dev@example.com",
+    });
+
+    expect(script).not.toBeNull();
+    if (!script) {
+      return;
+    }
+
+    expect(script).not.toContain("user.name");
+    expect(script).toContain("git config --global user.email 'pablo+dev@example.com'");
   });
 });
 
