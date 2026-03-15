@@ -24,9 +24,14 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
       - name: Install Dev Containers CLI
         run: |
-          bun install --global @devcontainers/cli
+          npm install --global @devcontainers/cli
           devcontainer --version
 
       - name: Install dependencies

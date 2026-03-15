@@ -175,10 +175,10 @@ describe("probePortAvailability", () => {
 describe("buildCopyKnownHostsScript", () => {
   test("skips missing or empty source files and only copies non-empty content", () => {
     const script = buildCopyKnownHostsScript();
-    expect(script).toContain("if [ ! -e '/tmp/devbox-known_hosts' ]; then");
-    expect(script).toContain("elif [ ! -f '/tmp/devbox-known_hosts' ]; then");
-    expect(script).toContain("elif [ ! -s '/tmp/devbox-known_hosts' ]; then");
-    expect(script).toContain("if mkdir -p ~/.ssh && cp '/tmp/devbox-known_hosts' ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; then");
+    expect(script).toContain("if [ ! -e '/run/devbox-known_hosts' ]; then");
+    expect(script).toContain("elif [ ! -f '/run/devbox-known_hosts' ]; then");
+    expect(script).toContain("elif [ ! -s '/run/devbox-known_hosts' ]; then");
+    expect(script).toContain("if mkdir -p ~/.ssh && cp '/run/devbox-known_hosts' ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; then");
     expect(script).toContain("printf '%s\\n' 'copied'");
     expect(script).toContain("exit 1");
   });
@@ -516,7 +516,7 @@ describe("formatDevcontainerProgressLine", () => {
 
   test("drops leaked env-probe dumps and bash job-control warnings", () => {
     const probeDump =
-      "3a47c555-eed4-4f46-b2d8-d62c464a43e0HOSTNAME=3bbefbad0c97SSH_AUTH_SOCK=/tmp/devbox-ssh-auth.sockPWD=/HOME=/home/vscodePATH=/usr/local/binUSER=vscode3a47c555-eed4-4f46-b2d8-d62c464a43e0";
+      "3a47c555-eed4-4f46-b2d8-d62c464a43e0HOSTNAME=3bbefbad0c97SSH_AUTH_SOCK=/run/devbox-ssh-auth.sockPWD=/HOME=/home/vscodePATH=/usr/local/binUSER=vscode3a47c555-eed4-4f46-b2d8-d62c464a43e0";
 
     expect(formatDevcontainerProgressLine(probeDump)).toBeNull();
     expect(

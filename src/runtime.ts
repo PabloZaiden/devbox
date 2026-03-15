@@ -263,12 +263,14 @@ export function buildRestoreRunnerHostKeysScript(remoteWorkspaceFolder: string):
 
 export function buildPersistRunnerHostKeysScript(remoteWorkspaceFolder: string): string {
   const hostKeysDir = getRunnerHostKeysDir(remoteWorkspaceFolder);
+  const wsDir = quoteShell(remoteWorkspaceFolder);
   return [
     `mkdir -p ${quoteShell(hostKeysDir)}`,
     `find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*' -exec cp {} ${quoteShell(hostKeysDir)}/ \\;`,
-    `chmod 700 ${quoteShell(hostKeysDir)}`,
-    `chmod 600 ${quoteShell(hostKeysDir)}/ssh_host_*_key 2>/dev/null || true`,
+    `chmod 755 ${quoteShell(hostKeysDir)}`,
+    `chmod 644 ${quoteShell(hostKeysDir)}/ssh_host_*_key 2>/dev/null || true`,
     `chmod 644 ${quoteShell(hostKeysDir)}/ssh_host_*_key.pub 2>/dev/null || true`,
+    `ws_owner=$(stat -c '%u:%g' ${wsDir} 2>/dev/null) && [ -n "$ws_owner" ] && chown -R "$ws_owner" ${quoteShell(hostKeysDir)} 2>/dev/null || true`,
   ].join("\n");
 }
 

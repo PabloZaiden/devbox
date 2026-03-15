@@ -307,7 +307,7 @@ function handleDevcontainer() {
     const script = args[args.length - 1] ?? "";
     log({ containerId, script });
 
-    if (script.includes("/tmp/devbox-known_hosts")) {
+    if (script.includes("/run/devbox-known_hosts")) {
       console.log(process.env.DEVBOX_FAKE_KNOWN_HOSTS_MODE || "missing");
       return;
     }
@@ -505,6 +505,7 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
     await writeFile(sshAuthSockPath, "fake-agent\n", "utf8");
   }
 
+  const xdgStateHome = path.join(tempDir, "state");
   const env = baseEnv();
   env.DEVBOX_FAKE_GH_MODE = options.ghToken ? "token" : "unauthenticated";
   env.DEVBOX_FAKE_GH_TOKEN = options.ghToken ?? "";
@@ -513,8 +514,9 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
   env.HOME = homeDir;
   env.PATH = `${path.join(fakeHostDir, "bin")}${path.delimiter}${env.PATH}`;
   env.SSH_AUTH_SOCK = sshAuthSockPath ?? "";
+  env.XDG_STATE_HOME = xdgStateHome;
 
-  const stateDir = getStateDir(homeDir, workspacePath);
+  const stateDir = getStateDir(homeDir, workspacePath, xdgStateHome);
   return {
     commandLogPath,
     env,
@@ -587,8 +589,16 @@ function baseEnv(): Record<string, string> {
   return env;
 }
 
-function getStateDir(homeDir: string, workspacePath: string): string {
-  return path.join(homeDir, "Library", "Application Support", "devbox", "workspaces", hashWorkspacePath(workspacePath));
+function getStateDir(homeDir: string, workspacePath: string, xdgStateHome?: string): string {
+  let root: string;
+  if (process.platform === "darwin") {
+    root = path.join(homeDir, "Library", "Application Support", "devbox");
+  } else if (xdgStateHome) {
+    root = path.join(xdgStateHome, "devbox");
+  } else {
+    root = path.join(homeDir, ".local", "state", "devbox");
+  }
+  return path.join(root, "workspaces", hashWorkspacePath(workspacePath));
 }
 
 async function readJson(filePath: string): Promise<any> {
