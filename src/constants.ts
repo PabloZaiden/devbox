@@ -1,4 +1,5 @@
 export const CLI_NAME = "devbox";
+export const DEFAULT_UP_AUTO_PORT_START = 5001;
 export const LEGACY_GENERATED_CONFIG_BASENAME = ".devbox.generated.devcontainer.json";
 export const MANAGED_LABEL_KEY = "devbox.managed";
 export const WORKSPACE_LABEL_KEY = "devbox.workspace";

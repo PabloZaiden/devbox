@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import {
   buildManagedConfig,
+  describeUpPortStrategy,
   discoverDevcontainerConfig,
   formatReadyMessage,
   getDefaultRemoteWorkspaceFolder,
@@ -12,10 +13,13 @@ import {
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
   getManagedContainerName,
+  getManagedPortFromContainerName,
   getManagedLabels,
+  helpText,
   parseArgs,
   prepareKnownHostsMount,
   resolvePort,
+  resolveUpPortPreference,
   type DevcontainerConfig,
 } from "../src/core";
 
@@ -87,6 +91,14 @@ describe("parseArgs", () => {
   });
 });
 
+describe("helpText", () => {
+  test("documents stored-port reuse and fallback auto-assignment for up", () => {
+    expect(helpText()).toContain("`devbox up` uses the explicit port when provided");
+    expect(helpText()).toContain("auto-assigns the first free port starting at 5001");
+    expect(helpText()).toContain("`devbox rebuild` reuses the last stored port for the workspace");
+  });
+});
+
 describe("resolvePort", () => {
   test("reuses stored port", () => {
     expect(
@@ -102,6 +114,57 @@ describe("resolvePort", () => {
         updatedAt: new Date().toISOString(),
       }),
     ).toBe(5003);
+  });
+});
+
+describe("resolveUpPortPreference", () => {
+  const state = {
+    version: 1,
+    workspacePath: "/tmp/ws",
+    workspaceHash: "hash",
+    port: 5003,
+    sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
+    generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
+    labels: { managed: "true" },
+    userDataDir: "/tmp/state",
+    updatedAt: new Date().toISOString(),
+  };
+
+  test("prefers an explicit port", () => {
+    expect(resolveUpPortPreference({ explicitPort: 5001, state, existingPublishedPort: 5002 })).toBe(5001);
+  });
+
+  test("reuses the stored workspace port when no explicit port is provided", () => {
+    expect(resolveUpPortPreference({ explicitPort: undefined, state, existingPublishedPort: 5002 })).toBe(5003);
+  });
+
+  test("falls back to an existing managed container port when state is missing", () => {
+    expect(resolveUpPortPreference({ explicitPort: undefined, state: null, existingPublishedPort: 5004 })).toBe(5004);
+  });
+
+  test("returns undefined when up should auto-assign a new port", () => {
+    expect(resolveUpPortPreference({ explicitPort: undefined, state: null, existingPublishedPort: undefined })).toBeUndefined();
+  });
+});
+
+describe("getManagedPortFromContainerName", () => {
+  test("round-trips the managed container name format", () => {
+    const containerName = getManagedContainerName("/tmp/my-workspace", 5007);
+    expect(getManagedPortFromContainerName(containerName)).toBe(5007);
+    expect(getManagedPortFromContainerName(`/${containerName}`)).toBe(5007);
+  });
+
+  test("ignores names that do not follow the managed naming convention", () => {
+    expect(getManagedPortFromContainerName("my-container")).toBeUndefined();
+    expect(getManagedPortFromContainerName("/devbox-example")).toBeUndefined();
+  });
+});
+
+describe("describeUpPortStrategy", () => {
+  test("describes the stored-port reuse and auto-assignment behavior", () => {
+    expect(describeUpPortStrategy()).toBe(
+      "Reuse the previous workspace port when available, otherwise auto-assign the first free port starting at 5001.",
+    );
   });
 });
 

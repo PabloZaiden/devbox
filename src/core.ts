@@ -7,6 +7,7 @@ import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
 import type { ParseError } from "jsonc-parser";
 import {
   CLI_NAME,
+  DEFAULT_UP_AUTO_PORT_START,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   KNOWN_HOSTS_SNAPSHOT_FILENAME,
   KNOWN_HOSTS_TARGET,
@@ -89,7 +90,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <path> Use .devcontainer/<path>/devcontainer.json.\n  -h, --help                    Show this help.\n\nNotes:\n  - Running ${CLI_NAME} with no arguments shows this help.\n  - The same port is published on host and container.\n  - There is no default port. Pass one explicitly the first time, or reuse the last stored port with \`${CLI_NAME} up\` / \`${CLI_NAME} rebuild\`.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
+  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <path> Use .devcontainer/<path>/devcontainer.json.\n  -h, --help                    Show this help.\n\nNotes:\n  - Running ${CLI_NAME} with no arguments shows this help.\n  - The same port is published on host and container.\n  - \`${CLI_NAME} up\` uses the explicit port when provided, otherwise reuses the last stored port for the workspace, otherwise auto-assigns the first free port starting at ${DEFAULT_UP_AUTO_PORT_START}.\n  - \`${CLI_NAME} rebuild\` reuses the last stored port for the workspace when no port is provided.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -270,6 +271,29 @@ export function getManagedContainerName(workspacePath: string, port: number): st
   return `devbox-${safeProjectName.slice(0, 48)}-${port}`;
 }
 
+export function getManagedPortFromContainerName(containerName: string | undefined): number | undefined {
+  if (!containerName) {
+    return undefined;
+  }
+
+  const normalizedName = containerName.replace(/^\//, "");
+  if (!normalizedName.startsWith("devbox-")) {
+    return undefined;
+  }
+
+  const match = normalizedName.match(/-(\d+)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const port = Number(match[1]);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return undefined;
+  }
+
+  return port;
+}
+
 export async function loadWorkspaceState(workspacePath: string): Promise<WorkspaceState | null> {
   const statePath = getWorkspaceStateFile(workspacePath);
   if (!existsSync(statePath)) {
@@ -322,6 +346,26 @@ export function resolvePort(command: CommandName, explicitPort: number | undefin
   throw new UserError(
     `No port was provided and no previous port is stored for this workspace. Run \`${CLI_NAME} up <port>\` first.`,
   );
+}
+
+export function resolveUpPortPreference(input: {
+  explicitPort: number | undefined;
+  state: WorkspaceState | null;
+  existingPublishedPort?: number;
+}): number | undefined {
+  if (input.explicitPort !== undefined) {
+    return input.explicitPort;
+  }
+
+  if (input.state) {
+    return input.state.port;
+  }
+
+  return input.existingPublishedPort;
+}
+
+export function describeUpPortStrategy(): string {
+  return `Reuse the previous workspace port when available, otherwise auto-assign the first free port starting at ${DEFAULT_UP_AUTO_PORT_START}.`;
 }
 
 export async function discoverDevcontainerConfig(
