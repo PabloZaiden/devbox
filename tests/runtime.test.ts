@@ -3,6 +3,7 @@ import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import type { DockerInspect } from "../src/core";
 import {
   buildAssertConfiguredSshAuthSockScript,
+  buildCopyKnownHostsScript,
   buildConfigureGitIdentityScript,
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
@@ -95,6 +96,18 @@ describe("buildStopManagedSshdScript", () => {
     expect(buildStopManagedSshdScript()).toContain("while read -r pid comm; do\n");
     expect(buildStopManagedSshdScript()).toContain('\ndone)\n');
     expect(buildStopManagedSshdScript()).not.toContain("do;");
+  });
+});
+
+describe("buildCopyKnownHostsScript", () => {
+  test("skips missing or empty source files and only copies non-empty content", () => {
+    const script = buildCopyKnownHostsScript();
+    expect(script).toContain("if [ ! -e '/tmp/devbox-known_hosts' ]; then");
+    expect(script).toContain("elif [ ! -f '/tmp/devbox-known_hosts' ]; then");
+    expect(script).toContain("elif [ ! -s '/tmp/devbox-known_hosts' ]; then");
+    expect(script).toContain("mkdir -p ~/.ssh");
+    expect(script).toContain("cp '/tmp/devbox-known_hosts' ~/.ssh/known_hosts");
+    expect(script).toContain("printf '%s\\n' 'copied'");
   });
 });
 

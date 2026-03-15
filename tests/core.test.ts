@@ -13,6 +13,7 @@ import {
   getManagedContainerName,
   getManagedLabels,
   parseArgs,
+  prepareKnownHostsMount,
   resolvePort,
   type DevcontainerConfig,
 } from "../src/core";
@@ -273,6 +274,33 @@ describe("buildManagedConfig", () => {
 
     expect(JSON.stringify(managed)).toContain('"GH_TOKEN":"${localEnv:GH_TOKEN}"');
     expect(JSON.stringify(managed)).not.toContain("ghp_");
+  });
+});
+
+describe("prepareKnownHostsMount", () => {
+  test("creates a staged snapshot for a non-empty host known_hosts file", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(path.join(homeDir, ".ssh"), { recursive: true });
+    await writeFile(path.join(homeDir, ".ssh", "known_hosts"), "github.com ssh-ed25519 AAAAC3Nza...\n");
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.warning).toBeUndefined();
+    expect(prepared.knownHostsPath).toBe(path.join(userDataDir, "known_hosts"));
+    expect(await Bun.file(prepared.knownHostsPath!).text()).toBe("github.com ssh-ed25519 AAAAC3Nza...\n");
+  });
+
+  test("skips an empty host known_hosts file with a warning", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(path.join(homeDir, ".ssh"), { recursive: true });
+    await writeFile(path.join(homeDir, ".ssh", "known_hosts"), "\n");
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.knownHostsPath).toBeNull();
+    expect(prepared.warning).toContain("Host known_hosts is empty");
   });
 });
 

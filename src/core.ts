@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
@@ -8,6 +8,7 @@ import type { ParseError } from "jsonc-parser";
 import {
   CLI_NAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+  KNOWN_HOSTS_SNAPSHOT_FILENAME,
   KNOWN_HOSTS_TARGET,
   LEGACY_GENERATED_CONFIG_BASENAME,
   MANAGED_LABEL_KEY,
@@ -38,6 +39,11 @@ export interface ManagedConfigOptions {
   sshAuthSock: string | null;
   knownHostsPath: string | null;
   githubTokenAvailable?: boolean;
+}
+
+export interface PreparedKnownHosts {
+  knownHostsPath: string | null;
+  warning?: string;
 }
 
 export interface WorkspaceState {
@@ -453,14 +459,39 @@ export function createWorkspaceState(input: {
   };
 }
 
-export async function getKnownHostsPath(): Promise<string | null> {
-  const candidate = path.join(os.homedir(), ".ssh", "known_hosts");
+export async function prepareKnownHostsMount(input: {
+  userDataDir: string;
+  homeDir?: string;
+}): Promise<PreparedKnownHosts> {
+  const candidate = path.join(input.homeDir ?? os.homedir(), ".ssh", "known_hosts");
+
   try {
     await access(candidate);
-    return candidate;
   } catch {
-    return null;
+    return { knownHostsPath: null };
   }
+
+  const details = await stat(candidate);
+  if (!details.isFile()) {
+    return {
+      knownHostsPath: null,
+      warning: `Host known_hosts is not a regular file and was skipped: ${candidate}.`,
+    };
+  }
+
+  const content = await readFile(candidate, "utf8");
+  if (content.trim().length === 0) {
+    return {
+      knownHostsPath: null,
+      warning: `Host known_hosts is empty and was skipped: ${candidate}.`,
+    };
+  }
+
+  await mkdir(input.userDataDir, { recursive: true });
+  const snapshotPath = path.join(input.userDataDir, KNOWN_HOSTS_SNAPSHOT_FILENAME);
+  await writeFile(snapshotPath, content, "utf8");
+  await chmod(snapshotPath, 0o600);
+  return { knownHostsPath: snapshotPath };
 }
 
 export function quoteShell(value: string): string {

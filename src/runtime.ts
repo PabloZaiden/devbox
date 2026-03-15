@@ -266,6 +266,24 @@ export function buildPersistRunnerHostKeysScript(remoteWorkspaceFolder: string):
   ].join("\n");
 }
 
+export function buildCopyKnownHostsScript(): string {
+  return [
+    `if [ ! -e ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then`,
+    "  printf '%s\\n' 'missing'",
+    `elif [ ! -f ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then`,
+    "  printf '%s\\n' 'missing'",
+    `elif [ ! -s ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then`,
+    "  printf '%s\\n' 'empty'",
+    "else",
+    "  umask 077",
+    "  mkdir -p ~/.ssh",
+    `  cp ${quoteShell(KNOWN_HOSTS_TARGET)} ~/.ssh/known_hosts`,
+    "  chmod 600 ~/.ssh/known_hosts",
+    "  printf '%s\\n' 'copied'",
+    "fi",
+  ].join("\n");
+}
+
 export function resolveSshAuthSockSource(input: {
   hostEnvSshAuthSock?: string;
   hostEnvSockExists: boolean;
@@ -469,9 +487,14 @@ export async function devcontainerUp(input: {
   return outcome;
 }
 
-export async function copyKnownHosts(containerId: string): Promise<void> {
-  const script = `if [ -f ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then umask 077 && mkdir -p ~/.ssh && cp ${quoteShell(KNOWN_HOSTS_TARGET)} ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; fi`;
-  await devcontainerExec(containerId, script, { quiet: true });
+export async function copyKnownHosts(containerId: string): Promise<"copied" | "missing" | "empty"> {
+  const result = await devcontainerExec(containerId, buildCopyKnownHostsScript(), { quiet: true });
+  const outcome = result.stdout.trim();
+  if (outcome === "copied" || outcome === "missing" || outcome === "empty") {
+    return outcome;
+  }
+
+  throw new UserError(`Unexpected known_hosts copy result: ${outcome || "<empty>"}.`);
 }
 
 export async function configureGitIdentity(
