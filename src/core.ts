@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parse as parseJsonc, type ParseError } from "jsonc-parser";
+import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
+import type { ParseError } from "jsonc-parser";
 import {
   CLI_NAME,
   KNOWN_HOSTS_TARGET,

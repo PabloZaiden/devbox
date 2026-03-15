@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -33,6 +33,7 @@ import {
   ensureHostEnvironment,
   ensurePathIgnored,
   formatCommandError,
+  isExecutableAvailable,
   inspectContainers,
   isCommandError,
   labelsForWorkspaceHash,
@@ -169,7 +170,7 @@ async function handleDown(
   workspacePath: string,
   state: Awaited<ReturnType<typeof loadWorkspaceState>>,
 ): Promise<void> {
-  if (!Bun.which("docker")) {
+  if (!isExecutableAvailable("docker")) {
     throw new UserError("Docker is required but was not found in PATH.");
   }
 

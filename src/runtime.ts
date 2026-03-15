@@ -1,5 +1,8 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { access, appendFile, mkdir, readFile } from "node:fs/promises";
+import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 import {
   type DockerInspect,
   type UpResult,
@@ -44,6 +47,10 @@ interface ExecOptions {
 export interface ResolvedHostEnvironment {
   sshAuthSock: string | null;
   warning?: string;
+}
+
+export function isExecutableAvailable(command: string): boolean {
+  return findExecutableOnPath(command) !== null;
 }
 
 export function buildStopManagedSshdScript(): string {
@@ -179,12 +186,12 @@ export function resolveSshAuthSockSource(input: {
 }): ResolvedHostEnvironment {
   const hostEnvSshAuthSock = input.hostEnvSshAuthSock?.trim() || undefined;
 
-  if (hostEnvSshAuthSock && input.hostEnvSockExists) {
-    return { sshAuthSock: hostEnvSshAuthSock };
-  }
-
   if (input.dockerDesktopHostServiceAvailable) {
     return { sshAuthSock: DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE };
+  }
+
+  if (hostEnvSshAuthSock && input.hostEnvSockExists) {
+    return { sshAuthSock: hostEnvSshAuthSock };
   }
 
   const detail = hostEnvSshAuthSock
@@ -208,18 +215,17 @@ export async function ensureHostEnvironment(options: {
     throw new UserError(`Unsupported platform: ${process.platform}. macOS and Linux are supported in v1.`);
   }
 
-  if (!Bun.which("docker")) {
+  if (!isExecutableAvailable("docker")) {
     throw new UserError("Docker is required but was not found in PATH.");
   }
 
-  if (!Bun.which("devcontainer")) {
+  if (!isExecutableAvailable("devcontainer")) {
     throw new UserError("Dev Container CLI is required but was not found in PATH.");
   }
 
   const hostEnvSshAuthSock = process.env.SSH_AUTH_SOCK?.trim() || undefined;
-  const hostEnvSockExists = hostEnvSshAuthSock ? await Bun.file(hostEnvSshAuthSock).exists() : false;
-  const dockerDesktopHostServiceAvailable =
-    (!hostEnvSshAuthSock || !hostEnvSockExists) && (await hasDockerDesktopHostService());
+  const hostEnvSockExists = hostEnvSshAuthSock ? await pathExists(hostEnvSshAuthSock) : false;
+  const dockerDesktopHostServiceAvailable = await hasDockerDesktopHostService();
 
   return resolveSshAuthSockSource({
     hostEnvSshAuthSock,
@@ -482,7 +488,7 @@ async function tryGetGitTopLevel(workspacePath: string): Promise<string | null> 
 }
 
 async function findListeningPids(port: number): Promise<string[]> {
-  if (Bun.which("lsof")) {
+  if (isExecutableAvailable("lsof")) {
     const result = await execute(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
       stdoutMode: "capture",
       stderrMode: "capture",
@@ -516,17 +522,21 @@ async function execute(command: string[], options: ExecOptions): Promise<ExecRes
     }
   }
 
-  const subprocess = Bun.spawn(command, {
+  const subprocess = spawn(command[0], command.slice(1), {
     cwd: options.cwd,
     env,
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   const stdoutPromise = consumeStream(subprocess.stdout, options.stdoutMode ?? "capture", false);
   const stderrPromise = consumeStream(subprocess.stderr, options.stderrMode ?? "capture", true);
-  const [stdout, stderr, exitCode] = await Promise.all([stdoutPromise, stderrPromise, subprocess.exited]);
+  const exitPromise = new Promise<number>((resolve, reject) => {
+    subprocess.once("error", reject);
+    subprocess.once("close", (exitCode) => {
+      resolve(exitCode ?? 0);
+    });
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([stdoutPromise, stderrPromise, exitPromise]);
 
   const result = { stdout, stderr, exitCode };
   if (exitCode !== 0 && !options.allowFailure) {
@@ -537,7 +547,7 @@ async function execute(command: string[], options: ExecOptions): Promise<ExecRes
 }
 
 async function consumeStream(
-  stream: ReadableStream<Uint8Array> | null,
+  stream: Readable | null,
   mode: NonNullable<ExecOptions["stdoutMode"]> | NonNullable<ExecOptions["stderrMode"]>,
   useStderr: boolean,
 ): Promise<string> {
@@ -546,22 +556,16 @@ async function consumeStream(
   }
 
   const writer = useStderr ? process.stderr : process.stdout;
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
+  stream.setEncoding("utf8");
   let captured = "";
   let buffered = "";
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    const chunk = decoder.decode(value, { stream: true });
-    captured += chunk;
+  for await (const chunk of stream) {
+    const text = typeof chunk === "string" ? chunk : String(chunk);
+    captured += text;
 
     if (mode === "raw") {
-      writer.write(chunk);
+      writer.write(text);
       continue;
     }
 
@@ -569,7 +573,7 @@ async function consumeStream(
       continue;
     }
 
-    buffered += chunk;
+    buffered += text;
     let newlineIndex = buffered.indexOf("\n");
     while (newlineIndex >= 0) {
       const line = buffered.slice(0, newlineIndex);
@@ -579,21 +583,49 @@ async function consumeStream(
     }
   }
 
-  const remaining = decoder.decode();
-  if (remaining) {
-    captured += remaining;
-    if (mode === "raw") {
-      writer.write(remaining);
-    } else if (mode === "devcontainer-json") {
-      buffered += remaining;
-    }
-  }
-
   if (mode === "devcontainer-json" && buffered.length > 0) {
     renderDevcontainerJsonLine(buffered, writer);
   }
 
   return captured;
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function findExecutableOnPath(command: string): string | null {
+  if (command.includes(path.sep)) {
+    return isExecutablePath(command) ? command : null;
+  }
+
+  const pathValue = process.env.PATH ?? "";
+  for (const directory of pathValue.split(path.delimiter)) {
+    if (!directory) {
+      continue;
+    }
+
+    const candidate = path.join(directory, command);
+    if (isExecutablePath(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function isExecutablePath(candidate: string): boolean {
+  try {
+    accessSync(candidate, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderDevcontainerJsonLine(line: string, writer: NodeJS.WriteStream): void {

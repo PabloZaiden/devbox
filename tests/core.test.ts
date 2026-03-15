@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -20,7 +20,7 @@ const tempPaths: string[] = [];
 afterEach(async () => {
   await Promise.all(
     tempPaths.splice(0).map(async (tempPath) => {
-      await Bun.$`rm -rf ${tempPath}`.quiet();
+      await rm(tempPath, { recursive: true, force: true });
     }),
   );
 });

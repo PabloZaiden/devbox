@@ -9,12 +9,26 @@ import {
   getRunnerCredFile,
   getRunnerHostKeysDir,
   getRunnerSummaryLines,
+  isExecutableAvailable,
   requiresSshAuthSockPermissionFix,
   resolveSshAuthSockSource,
 } from "../src/runtime";
 
 describe("resolveSshAuthSockSource", () => {
-  test("uses the host ssh socket when it exists", () => {
+  test("prefers Docker Desktop host services when available", () => {
+    expect(
+      resolveSshAuthSockSource({
+        hostEnvSshAuthSock: "/tmp/agent.sock",
+        hostEnvSockExists: true,
+        dockerDesktopHostServiceAvailable: true,
+        allowMissingSsh: false,
+      }),
+    ).toEqual({
+      sshAuthSock: DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+    });
+  });
+
+  test("uses the host ssh socket when Docker Desktop host services are unavailable", () => {
     expect(
       resolveSshAuthSockSource({
         hostEnvSshAuthSock: "/tmp/agent.sock",
@@ -167,5 +181,11 @@ describe("formatDevcontainerProgressLine", () => {
     expect(
       formatDevcontainerProgressLine('{"type":"text","level":2,"text":"29.2.1"}'),
     ).toBeNull();
+  });
+});
+
+describe("isExecutableAvailable", () => {
+  test("finds common executables on PATH", () => {
+    expect(isExecutableAvailable("sh")).toBe(true);
   });
 });

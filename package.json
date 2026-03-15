@@ -1,16 +1,44 @@
 {
-  "name": "expose-devcontainer",
+  "name": "@pablozaiden/devbox",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Bun CLI to run and expose a devcontainer with SSH agent sharing and a forwarded ssh-server-runner port.",
+  "description": "CLI to run and expose a devcontainer with SSH agent sharing and a forwarded ssh-server-runner port.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PabloZaiden/devbox.git"
+  },
+  "homepage": "https://github.com/PabloZaiden/devbox#readme",
+  "bugs": {
+    "url": "https://github.com/PabloZaiden/devbox/issues"
+  },
+  "keywords": [
+    "devcontainer",
+    "docker",
+    "ssh",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
   "bin": {
-    "devbox": "./src/cli.ts"
+    "devbox": "./dist/devbox.js"
   },
   "scripts": {
-    "build": "bun build --compile --outfile dist/devbox src/cli.ts",
+    "build": "rm -rf dist && mkdir -p dist && bun build --target=node --packages=bundle --outfile dist/devbox.js src/cli.ts && chmod +x dist/devbox.js",
     "dev": "bun run src/cli.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "pack:dry-run": "npm pack --dry-run"
   },
   "dependencies": {
     "jsonc-parser": "^3.3.1"
