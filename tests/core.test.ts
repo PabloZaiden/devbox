@@ -26,8 +26,12 @@ afterEach(async () => {
 });
 
 describe("parseArgs", () => {
-  test("supports positional up port", () => {
-    expect(parseArgs(["5001"])).toEqual({ command: "up", port: 5001, allowMissingSsh: false });
+  test("shows help when no args are provided", () => {
+    expect(parseArgs([])).toEqual({ command: "help", allowMissingSsh: false });
+  });
+
+  test("supports up with a positional port", () => {
+    expect(parseArgs(["up", "5001"])).toEqual({ command: "up", port: 5001, allowMissingSsh: false });
   });
 
   test("supports rebuild with flag port and allow-missing-ssh", () => {
@@ -49,11 +53,16 @@ describe("parseArgs", () => {
       allowMissingSsh: false,
       devcontainerSubpath: path.join("services", "api"),
     });
-    expect(parseArgs(["--devcontainer-subpath=python"])).toEqual({
+    expect(parseArgs(["up", "--devcontainer-subpath=python"])).toEqual({
       command: "up",
       allowMissingSsh: false,
       devcontainerSubpath: "python",
     });
+  });
+
+  test("requires an explicit command for options or ports", () => {
+    expect(() => parseArgs(["5001"])).toThrow("A command is required.");
+    expect(() => parseArgs(["--devcontainer-subpath=python"])).toThrow("A command is required.");
   });
 
   test("rejects devcontainer subpaths that escape .devcontainer", () => {

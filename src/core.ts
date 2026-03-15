@@ -81,24 +81,28 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME} [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} --help\n\nNotes:\n  - The same port is published on host and container.\n  - If no port is provided for up/rebuild, the last stored port for this workspace is reused.\n  - Pass --allow-missing-ssh to continue without SSH agent sharing when no usable SSH agent socket is available.\n  - Pass --devcontainer-subpath to use .devcontainer/<subpath>/devcontainer.json.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
+  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <path> Use .devcontainer/<path>/devcontainer.json.\n  -h, --help                    Show this help.\n\nNotes:\n  - Running ${CLI_NAME} with no arguments shows this help.\n  - The same port is published on host and container.\n  - There is no default port. Pass one explicitly the first time, or reuse the last stored port with \`${CLI_NAME} up\` / \`${CLI_NAME} rebuild\`.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args = [...argv];
 
   if (args.length === 0) {
-    return { command: "up", allowMissingSsh: false };
+    return { command: "help", allowMissingSsh: false };
   }
 
-  let command: CommandName = "up";
+  let command: CommandName;
   const first = args[0];
 
-  if (first === "up" || first === "down" || first === "rebuild" || first === "shell" || first === "help") {
+  if (first === "up" || first === "down" || first === "rebuild" || first === "shell") {
     command = first;
     args.shift();
+  } else if (first === "help") {
+    return { command: "help", allowMissingSsh: false };
   } else if (first === "--help" || first === "-h") {
     return { command: "help", allowMissingSsh: false };
+  } else {
+    throw new UserError(`A command is required. Run \`${CLI_NAME} --help\` for usage.`);
   }
 
   let port: number | undefined;
@@ -303,7 +307,9 @@ export function resolvePort(command: CommandName, explicitPort: number | undefin
     return state.port;
   }
 
-  throw new UserError(`No port was provided and no previous port is stored for this workspace. Run \`${CLI_NAME} <port>\` first.`);
+  throw new UserError(
+    `No port was provided and no previous port is stored for this workspace. Run \`${CLI_NAME} up <port>\` first.`,
+  );
 }
 
 export async function discoverDevcontainerConfig(

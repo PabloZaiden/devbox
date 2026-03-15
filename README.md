@@ -31,6 +31,8 @@ npm install -g @pablozaiden/devbox
 
 After either install, `devbox` is available in any directory.
 
+Run `devbox` with no arguments to see the CLI help.
+
 ## Requirements
 
 - macOS or Linux
@@ -45,20 +47,23 @@ After either install, `devbox` is available in any directory.
 ## Commands
 
 ```bash
-# Start or reuse the devcontainer on port 5001
-devbox 5001
+# Show CLI help
+devbox
 
-# Same as above
-devbox up 5001
+# Start or reuse the devcontainer on a chosen port
+devbox up <port>
 
 # Continue even if SSH agent sharing is unavailable
-devbox up 5001 --allow-missing-ssh
+devbox up <port> --allow-missing-ssh
 
 # Use a specific devcontainer under .devcontainer/services/api
-devbox up 5001 --devcontainer-subpath services/api
+devbox up <port> --devcontainer-subpath services/api
 
 # Rebuild/recreate the managed devcontainer
-devbox rebuild 5001
+devbox rebuild <port>
+
+# Reuse the last stored port for this workspace
+devbox up
 
 # Open an interactive shell in the running managed devcontainer for this workspace
 devbox shell
@@ -67,7 +72,7 @@ devbox shell
 devbox down
 ```
 
-If you omit the port for `up` or `rebuild`, `devbox` will reuse the last port stored for the current workspace.
+There is no default port. If you omit the port for `up` or `rebuild`, `devbox` will reuse the last port stored for the current workspace; otherwise pass a port explicitly.
 
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
 
@@ -90,7 +95,7 @@ For a quick smoke test, this repository includes `examples/smoke-workspace/.devc
 
 ```bash
 cd examples/smoke-workspace
-../../dist/devbox.js up 5001 --allow-missing-ssh
+../../dist/devbox.js up <port> --allow-missing-ssh
 ```
 
 ## Notes
@@ -99,7 +104,7 @@ cd examples/smoke-workspace
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
 - `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
-- Re-running `devbox` after a host restart recreates the desired state: container up, port published, SSH runner started again.
+- Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
