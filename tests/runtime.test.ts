@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import type { DockerInspect } from "../src/core";
 import {
@@ -7,6 +10,7 @@ import {
   buildConfigureGitIdentityScript,
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
+  ensurePathIgnored,
   buildInteractiveShellScript,
   buildPersistRunnerHostKeysScript,
   buildRestoreRunnerHostKeysScript,
@@ -23,6 +27,16 @@ import {
   requiresSshAuthSockPermissionFix,
   resolveSshAuthSockSource,
 } from "../src/runtime";
+
+const tempPaths: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    tempPaths.splice(0).map(async (tempPath) => {
+      await rm(tempPath, { recursive: true, force: true });
+    }),
+  );
+});
 
 describe("resolveSshAuthSockSource", () => {
   test("prefers Docker Desktop host services when available", () => {
@@ -243,6 +257,48 @@ describe("buildConfigureGitIdentityScript", () => {
 
     expect(script).not.toContain("user.name");
     expect(script).toContain("git config --global user.email 'pablo+dev@example.com'");
+  });
+});
+
+describe("ensurePathIgnored", () => {
+  test("writes to the common exclude file for git worktrees", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-runtime-test-"));
+    tempPaths.push(tempDir);
+    const repoDir = path.join(tempDir, "repo");
+    const worktreeDir = path.join(tempDir, "worktree");
+    const targetPath = path.join(worktreeDir, ".devcontainer", ".devcontainer.json");
+
+    const run = (cmd: string[], cwd?: string) => {
+      const result = Bun.spawnSync(cmd, {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(Buffer.from(result.stderr).toString("utf8"));
+      }
+    };
+
+    run(["git", "init", repoDir]);
+    run(["git", "-C", repoDir, "config", "user.email", "devbox@example.com"]);
+    run(["git", "-C", repoDir, "config", "user.name", "Devbox Test"]);
+    await writeFile(path.join(repoDir, "README.md"), "root\n", "utf8");
+    run(["git", "-C", repoDir, "add", "README.md"]);
+    run(["git", "-C", repoDir, "commit", "-m", "init"]);
+    run(["git", "-C", repoDir, "worktree", "add", worktreeDir]);
+
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, "{}\n", "utf8");
+    await ensurePathIgnored(worktreeDir, targetPath);
+
+    const excludePathResult = Bun.spawnSync(
+      ["git", "-C", worktreeDir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    expect(excludePathResult.exitCode).toBe(0);
+    const excludePath = Buffer.from(excludePathResult.stdout).toString("utf8").trim();
+    const excludeContent = await readFile(excludePath, "utf8");
+    expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
   });
 });
 

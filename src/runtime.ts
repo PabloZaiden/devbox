@@ -372,7 +372,10 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
   }
 
   const normalized = `/${relative.split(path.sep).join("/")}`;
-  const excludePath = path.join(gitTopLevel, ".git", "info", "exclude");
+  const excludePath = await tryGetGitPath(workspacePath, "info/exclude");
+  if (!excludePath) {
+    return;
+  }
   await mkdir(path.dirname(excludePath), { recursive: true });
 
   let current = "";
@@ -673,6 +676,29 @@ async function dockerExec(
 async function tryGetGitTopLevel(workspacePath: string): Promise<string | null> {
   try {
     const result = await execute(["git", "-C", workspacePath, "rev-parse", "--show-toplevel"], {
+      stdoutMode: "capture",
+      stderrMode: "capture",
+      allowFailure: true,
+    });
+
+    if (result.exitCode !== 0) {
+      return null;
+    }
+
+    const trimmed = result.stdout.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function tryGetGitPath(workspacePath: string, suffix: string): Promise<string | null> {
+  if (!isExecutableAvailable("git")) {
+    return null;
+  }
+
+  try {
+    const result = await execute(["git", "-C", workspacePath, "rev-parse", "--path-format=absolute", "--git-path", suffix], {
       stdoutMode: "capture",
       stderrMode: "capture",
       allowFailure: true,
