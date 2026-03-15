@@ -11,8 +11,8 @@ import {
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
   getManagedContainerName,
-  getKnownHostsPath,
   getManagedLabels,
+  prepareKnownHostsMount,
   getWorkspaceUserDataDir,
   hashWorkspacePath,
   helpText,
@@ -85,20 +85,20 @@ async function handleUpLike(
 ): Promise<void> {
   const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
   const port = resolvePort(command, explicitPort, state);
-  const knownHostsPath = await getKnownHostsPath();
   const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
   const generatedConfigPath = getGeneratedConfigPath(discovered.path);
   const legacyGeneratedConfigPath = getLegacyGeneratedConfigPath(discovered.path);
   const workspaceHash = hashWorkspacePath(workspacePath);
   const labels = getManagedLabels(workspaceHash);
   const userDataDir = getWorkspaceUserDataDir(workspacePath);
+  const preparedKnownHosts = await prepareKnownHostsMount({ userDataDir });
   const containerName = getManagedContainerName(workspacePath, port);
 
   const managedConfig = buildManagedConfig(discovered.config, {
     port,
     containerName,
     sshAuthSock: environment.sshAuthSock,
-    knownHostsPath,
+    knownHostsPath: preparedKnownHosts.knownHostsPath,
     githubTokenAvailable: environment.githubToken !== null,
   });
 
@@ -107,6 +107,9 @@ async function handleUpLike(
   }
   if (environment.githubTokenWarning) {
     console.warn(`Warning: ${environment.githubTokenWarning}`);
+  }
+  if (preparedKnownHosts.warning) {
+    console.warn(`Warning: ${preparedKnownHosts.warning}`);
   }
 
   if (environment.sshAuthSock === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE) {
@@ -174,7 +177,10 @@ async function handleUpLike(
   if (environment.sshAuthSock) {
     await assertConfiguredSshAuthSockAvailable(upResult.containerId);
   }
-  await copyKnownHosts(upResult.containerId);
+  const knownHostsCopyResult = await copyKnownHosts(upResult.containerId);
+  if (knownHostsCopyResult === "empty") {
+    console.warn("Warning: Prepared known_hosts data was empty inside the devcontainer, so it was not copied.");
+  }
   if (environment.gitUserName || environment.gitUserEmail) {
     console.log("Syncing Git author identity from the host into the devcontainer...");
     await configureGitIdentity(upResult.containerId, environment.gitUserName, environment.gitUserEmail);
@@ -203,8 +209,8 @@ async function handleUpLike(
   );
 
   console.log(formatReadyMessage(upResult.containerId, port, remoteWorkspaceFolder));
-  if (!knownHostsPath) {
-    console.log("Host known_hosts was not found, so only SSH agent sharing was configured.");
+  if (!preparedKnownHosts.knownHostsPath || knownHostsCopyResult !== "copied") {
+    console.log("Host known_hosts was unavailable for injection, so only SSH agent sharing was configured.");
   }
 }
 
