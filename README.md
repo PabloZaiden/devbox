@@ -11,7 +11,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Names the managed container as `devbox-<project>-<port>`.
 - Publishes the same TCP port on host and container.
 - Mounts the current directory into the container as the workspace.
-- Shares a usable SSH agent socket with the container and copies `known_hosts` into the container.
+- Shares a usable SSH agent socket with the container and copies a validated, non-empty `known_hosts` snapshot into the container.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
 - Runs the [`ssh-server-runner`](https://github.com/PabloZaiden/ssh-server-runner) one-liner inside the devcontainer.
 - Persists the runner credentials on the mounted workspace as a local `.sshcred` file, and keeps SSH host keys in `.devbox-ssh-host-keys/`, so they survive `down` / `rebuild`.
@@ -120,4 +120,5 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
+- `devbox` stages a snapshot of the host `~/.ssh/known_hosts` before startup and skips injection with a warning when that file is missing, unreadable, empty, symlinked, or not a regular file.
 - When the host already has Git author identity configured, `devbox` copies it into the container user's global Git config if the container does not already define those values.

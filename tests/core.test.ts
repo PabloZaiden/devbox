@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -13,6 +13,7 @@ import {
   getManagedContainerName,
   getManagedLabels,
   parseArgs,
+  prepareKnownHostsMount,
   resolvePort,
   type DevcontainerConfig,
 } from "../src/core";
@@ -273,6 +274,72 @@ describe("buildManagedConfig", () => {
 
     expect(JSON.stringify(managed)).toContain('"GH_TOKEN":"${localEnv:GH_TOKEN}"');
     expect(JSON.stringify(managed)).not.toContain("ghp_");
+  });
+});
+
+describe("prepareKnownHostsMount", () => {
+  test("creates a staged snapshot for a non-empty host known_hosts file", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(path.join(homeDir, ".ssh"), { recursive: true });
+    await writeFile(path.join(homeDir, ".ssh", "known_hosts"), "github.com ssh-ed25519 AAAAC3Nza...\n");
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.warning).toBeUndefined();
+    expect(prepared.knownHostsPath).toBe(path.join(userDataDir, "known_hosts"));
+    expect(await Bun.file(prepared.knownHostsPath!).text()).toBe("github.com ssh-ed25519 AAAAC3Nza...\n");
+  });
+
+  test("skips an empty host known_hosts file with a warning", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(path.join(homeDir, ".ssh"), { recursive: true });
+    await writeFile(path.join(homeDir, ".ssh", "known_hosts"), "\n");
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.knownHostsPath).toBeNull();
+    expect(prepared.warning).toContain("Host known_hosts is empty");
+  });
+
+  test("warns when the host known_hosts file is missing", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(path.join(homeDir, ".ssh"), { recursive: true });
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.knownHostsPath).toBeNull();
+    expect(prepared.warning).toContain("Host known_hosts was not found");
+  });
+
+  test("skips symlinked host known_hosts files with a warning", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const sshDir = path.join(homeDir, ".ssh");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(sshDir, { recursive: true });
+    const realKnownHosts = path.join(tempDir, "known_hosts.real");
+    await writeFile(realKnownHosts, "github.com ssh-ed25519 AAAAC3Nza...\n");
+    await symlink(realKnownHosts, path.join(sshDir, "known_hosts"));
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.knownHostsPath).toBeNull();
+    expect(prepared.warning).toContain("symbolic link");
+  });
+
+  test("warns instead of throwing when staging fails", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const homeDir = path.join(tempDir, "home");
+    const userDataDir = path.join(tempDir, "user-data");
+    await mkdir(path.join(homeDir, ".ssh"), { recursive: true });
+    await writeFile(path.join(homeDir, ".ssh", "known_hosts"), "github.com ssh-ed25519 AAAAC3Nza...\n");
+    await writeFile(userDataDir, "occupied\n");
+    const prepared = await prepareKnownHostsMount({ userDataDir, homeDir });
+    expect(prepared.knownHostsPath).toBeNull();
+    expect(prepared.warning).toContain("could not be staged");
   });
 });
 
