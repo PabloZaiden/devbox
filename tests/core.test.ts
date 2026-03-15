@@ -249,7 +249,6 @@ describe("buildManagedConfig", () => {
     expect(managed.mounts).toEqual([
       "type=bind,source=/tmp/a,target=/tmp/a",
       "type=bind,source=/tmp/agent.sock,target=/tmp/devbox-ssh-auth.sock",
-      "type=bind,source=/tmp/known_hosts,target=/tmp/devbox-known_hosts,readonly",
     ]);
     expect(managed.containerEnv).toEqual({
       FOO: "bar",

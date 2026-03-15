@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { KNOWN_HOSTS_SNAPSHOT_FILENAME, KNOWN_HOSTS_TARGET, SSH_AUTH_SOCK_TARGET } from "../src/constants";
+import { KNOWN_HOSTS_SNAPSHOT_FILENAME, SSH_AUTH_SOCK_TARGET } from "../src/constants";
 import { hashWorkspacePath } from "../src/core";
 import { buildInteractiveShellScript } from "../src/runtime";
 
@@ -229,6 +229,10 @@ function handleDocker() {
     return;
   }
 
+  if (args[0] === "cp") {
+    return;
+  }
+
   if (args[0] === "exec") {
     let user;
     let index = 1;
@@ -352,7 +356,7 @@ afterEach(async () => {
   );
 });
 
-describe("example workspaces", () => {
+describe("example workspaces (simulated host tools)", () => {
   test("smoke workspace exercises up, shell, and down through the CLI", async () => {
     const fixture = await setupExampleFixture("smoke-workspace");
     const sourceBefore = await readFile(fixture.sourceConfigPath, "utf8");
@@ -432,10 +436,7 @@ describe("example workspaces", () => {
       "ghcr.io/devcontainers/features/terraform:1": {},
     });
     expect(generatedConfig.runArgs).toEqual(["--name", "devbox-complex-workspace-5001", "-p", "5001:5001"]);
-    expect(generatedConfig.mounts).toEqual([
-      `type=bind,source=${fixture.sshAuthSockPath},target=${SSH_AUTH_SOCK_TARGET}`,
-      `type=bind,source=${knownHostsSnapshotPath},target=${KNOWN_HOSTS_TARGET},readonly`,
-    ]);
+    expect(generatedConfig.mounts).toEqual([`type=bind,source=${fixture.sshAuthSockPath},target=${SSH_AUTH_SOCK_TARGET}`]);
     expect(generatedConfig.containerEnv).toEqual({
       GH_TOKEN: "${localEnv:GH_TOKEN}",
       SSH_AUTH_SOCK: SSH_AUTH_SOCK_TARGET,

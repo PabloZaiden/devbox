@@ -38,6 +38,7 @@
     "build": "rm -rf dist && mkdir -p dist && bun build --target=node --packages=bundle --outfile dist/devbox.js src/cli.ts && chmod +x dist/devbox.js",
     "dev": "bun run src/cli.ts",
     "test": "bun test",
+    "test:fast": "DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 bun test",
     "pack:dry-run": "npm pack --dry-run"
   },
   "dependencies": {

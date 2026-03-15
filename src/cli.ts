@@ -190,7 +190,7 @@ async function handleUpLike(
   if (environment.sshAuthSock) {
     await assertConfiguredSshAuthSockAvailable(upResult.containerId);
   }
-  const knownHostsCopyResult = await copyKnownHosts(upResult.containerId);
+  const knownHostsCopyResult = await copyKnownHosts(upResult.containerId, preparedKnownHosts.knownHostsPath);
   if (knownHostsCopyResult === "empty") {
     console.warn("Warning: Prepared known_hosts data was empty inside the devcontainer, so it was not copied.");
   }

@@ -272,17 +272,17 @@ export function buildPersistRunnerHostKeysScript(remoteWorkspaceFolder: string):
   ].join("\n");
 }
 
-export function buildCopyKnownHostsScript(): string {
+export function buildCopyKnownHostsScript(sourcePath = KNOWN_HOSTS_TARGET): string {
   return [
-    `if [ ! -e ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then`,
+    `if [ ! -e ${quoteShell(sourcePath)} ]; then`,
     "  printf '%s\\n' 'missing'",
-    `elif [ ! -f ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then`,
+    `elif [ ! -f ${quoteShell(sourcePath)} ]; then`,
     "  printf '%s\\n' 'missing'",
-    `elif [ ! -s ${quoteShell(KNOWN_HOSTS_TARGET)} ]; then`,
+    `elif [ ! -s ${quoteShell(sourcePath)} ]; then`,
     "  printf '%s\\n' 'empty'",
     "else",
     "  umask 077",
-    `  if mkdir -p ~/.ssh && cp ${quoteShell(KNOWN_HOSTS_TARGET)} ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; then`,
+    `  if mkdir -p ~/.ssh && cp ${quoteShell(sourcePath)} ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts; then`,
     "    printf '%s\\n' 'copied'",
     "  else",
     "    exit 1",
@@ -518,9 +518,18 @@ export async function devcontainerUp(input: {
   return outcome;
 }
 
-export async function copyKnownHosts(containerId: string): Promise<"copied" | "missing" | "empty"> {
-  const result = await devcontainerExec(containerId, buildCopyKnownHostsScript(), { quiet: true });
-  const outcome = result.stdout.trim();
+export async function copyKnownHosts(
+  containerId: string,
+  hostKnownHostsPath?: string | null,
+): Promise<"copied" | "missing" | "empty"> {
+  let outcome: string;
+  if (hostKnownHostsPath) {
+    await dockerWriteFile(containerId, hostKnownHostsPath, KNOWN_HOSTS_TARGET);
+    outcome = (await devcontainerExec(containerId, buildCopyKnownHostsScript(), { quiet: true })).stdout.trim();
+  } else {
+    outcome = (await devcontainerExec(containerId, buildCopyKnownHostsScript(), { quiet: true })).stdout.trim();
+  }
+
   if (outcome === "copied" || outcome === "missing" || outcome === "empty") {
     return outcome;
   }
@@ -581,7 +590,7 @@ export async function startRunner(
   port: number,
   remoteWorkspaceFolder: string,
 ): Promise<void> {
-  const script = `curl -fsSL ${quoteShell(RUNNER_URL)} | env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash`;
+  const script = `curl -fsSL ${quoteShell(getRunnerUrl())} | env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash`;
   const result = await devcontainerExec(containerId, script, { quiet: true });
   const summaryLines = getRunnerSummaryLines(result.stdout);
 
@@ -606,6 +615,11 @@ export async function persistRunnerHostKeys(
     quiet: true,
     user: "root",
   });
+}
+
+function getRunnerUrl(): string {
+  const override = process.env.DEVBOX_RUNNER_URL?.trim();
+  return override && override.length > 0 ? override : RUNNER_URL;
 }
 
 export function resolveShellContainerId(input: {
@@ -682,6 +696,47 @@ async function devcontainerExec(
     stdoutMode: options.quiet ? "capture" : "raw",
     stderrMode: options.quiet ? "capture" : "raw",
   });
+}
+
+async function dockerWriteFile(containerId: string, sourcePath: string, destinationPath: string): Promise<void> {
+  const content = await readFile(sourcePath);
+  const subprocess = spawn(
+    "docker",
+    [
+      "exec",
+      "-i",
+      "--user",
+      "root",
+      containerId,
+      "sh",
+      "-lc",
+      `cat > ${quoteShell(destinationPath)} && chmod 644 ${quoteShell(destinationPath)}`,
+    ],
+    {
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+
+  subprocess.stdin?.end(content);
+
+  const stdoutPromise = consumeStream(subprocess.stdout, "capture", false);
+  const stderrPromise = consumeStream(subprocess.stderr, "capture", true);
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    subprocess.once("error", reject);
+    subprocess.once("close", (code) => {
+      resolve(code ?? 0);
+    });
+  });
+  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+
+  if (exitCode !== 0) {
+    throw new CommandError(["docker", "exec", "-i", "--user", "root", containerId, "sh", "-lc", "<streamed known_hosts>"], {
+      stdout,
+      stderr,
+      exitCode,
+    });
+  }
 }
 
 async function dockerExec(
