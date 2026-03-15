@@ -7,6 +7,7 @@ import {
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
   buildInteractiveShellScript,
+  findFirstAvailablePort,
   buildPersistRunnerHostKeysScript,
   buildRestoreRunnerHostKeysScript,
   buildStopManagedSshdScript,
@@ -95,6 +96,37 @@ describe("buildStopManagedSshdScript", () => {
     expect(buildStopManagedSshdScript()).toContain("while read -r pid comm; do\n");
     expect(buildStopManagedSshdScript()).toContain('\ndone)\n');
     expect(buildStopManagedSshdScript()).not.toContain("do;");
+  });
+});
+
+describe("findFirstAvailablePort", () => {
+  test("returns the starting port when it is available", async () => {
+    await expect(findFirstAvailablePort(5001, async () => true)).resolves.toBe(5001);
+  });
+
+  test("skips unavailable ports until it finds a free one", async () => {
+    const checkedPorts: number[] = [];
+
+    await expect(
+      findFirstAvailablePort(5001, async (port) => {
+        checkedPorts.push(port);
+        return port === 5003;
+      }),
+    ).resolves.toBe(5003);
+
+    expect(checkedPorts).toEqual([5001, 5002, 5003]);
+  });
+
+  test("rejects invalid starting ports", async () => {
+    await expect(findFirstAvailablePort(0, async () => true)).rejects.toThrow(
+      "Port must be between 1 and 65535. Received: 0",
+    );
+  });
+
+  test("throws when there are no available ports in range", async () => {
+    await expect(findFirstAvailablePort(65535, async () => false)).rejects.toThrow(
+      "No available host port was found starting at 65535.",
+    );
   });
 });
 

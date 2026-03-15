@@ -5,6 +5,7 @@ import {
   buildManagedConfig,
   createWorkspaceState,
   deleteWorkspaceState,
+  describeUpPortStrategy,
   discoverDevcontainerConfig,
   getDefaultRemoteWorkspaceFolder,
   getGeneratedConfigPath,
@@ -19,6 +20,7 @@ import {
   parseArgs,
   removeGeneratedConfig,
   resolvePort,
+  resolveUpPortPreference,
   saveWorkspaceState,
   type DockerInspect,
   UserError,
@@ -34,6 +36,7 @@ import {
   ensureGeneratedConfigIgnored,
   ensureHostEnvironment,
   ensurePathIgnored,
+  findFirstAvailablePort,
   formatCommandError,
   isExecutableAvailable,
   inspectContainers,
@@ -49,7 +52,7 @@ import {
   startRunner,
   stopManagedSshd,
 } from "./runtime";
-import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, RUNNER_HOST_KEYS_DIRNAME } from "./constants";
+import { DEFAULT_UP_AUTO_PORT_START, DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, RUNNER_HOST_KEYS_DIRNAME } from "./constants";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
@@ -82,14 +85,34 @@ async function handleUpLike(
   allowMissingSsh: boolean,
   devcontainerSubpath: string | undefined,
 ): Promise<void> {
+  const workspaceHash = hashWorkspacePath(workspacePath);
+  const labels = getManagedLabels(workspaceHash);
+  const existingContainerIds = await listManagedContainers(labels);
+  if (command === "up" && existingContainerIds.length > 1) {
+    throw new UserError("More than one managed container was found for this workspace. Run `devbox down` first.");
+  }
+
+  let existingInspects: DockerInspect[] = [];
+  if (existingContainerIds.length > 0) {
+    existingInspects = await inspectContainers(existingContainerIds);
+  }
+
+  const port =
+    command === "up"
+      ? (resolveUpPortPreference({
+          explicitPort,
+          state,
+          existingPublishedPort: getPreferredPublishedHostPort(existingInspects[0]),
+        }) ?? (await findFirstAvailablePort(DEFAULT_UP_AUTO_PORT_START)))
+      : resolvePort(command, explicitPort, state);
+
+  console.log(`Using port ${port}. ${command === "up" ? describeUpPortStrategy() : ""}`.trim());
+
   const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
-  const port = resolvePort(command, explicitPort, state);
   const knownHostsPath = await getKnownHostsPath();
   const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
   const generatedConfigPath = getGeneratedConfigPath(discovered.path);
   const legacyGeneratedConfigPath = getLegacyGeneratedConfigPath(discovered.path);
-  const workspaceHash = hashWorkspacePath(workspacePath);
-  const labels = getManagedLabels(workspaceHash);
   const userDataDir = getWorkspaceUserDataDir(workspacePath);
   const containerName = getManagedContainerName(workspacePath, port);
 
@@ -120,16 +143,6 @@ async function handleUpLike(
   await ensureGeneratedConfigIgnored(workspacePath, generatedConfigPath);
   await removeGeneratedConfig(legacyGeneratedConfigPath);
   await writeManagedConfig(generatedConfigPath, managedConfig);
-
-  const existingContainerIds = await listManagedContainers(labels);
-  if (command === "up" && existingContainerIds.length > 1) {
-    throw new UserError("More than one managed container was found for this workspace. Run `devbox down` first.");
-  }
-
-  let existingInspects: DockerInspect[] = [];
-  if (existingContainerIds.length > 0) {
-    existingInspects = await inspectContainers(existingContainerIds);
-  }
 
   if (command === "rebuild") {
     await removeContainers(existingContainerIds);
@@ -296,6 +309,15 @@ function getPublishedHostPorts(container: DockerInspect): number[] {
   }
 
   return [...values];
+}
+
+function getPreferredPublishedHostPort(container: DockerInspect | undefined): number | undefined {
+  if (!container) {
+    return undefined;
+  }
+
+  const [port] = getPublishedHostPorts(container);
+  return port;
 }
 
 async function runStepWithHeartbeat<T>(input: {

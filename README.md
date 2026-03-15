@@ -54,6 +54,10 @@ devbox
 # Start or reuse the devcontainer on a chosen port
 devbox up <port>
 
+# Start or reuse the devcontainer, reusing the stored workspace port when available
+# or auto-assigning the first free port from 5001 when none has been stored yet
+devbox up
+
 # Continue even if SSH agent sharing is unavailable
 devbox up <port> --allow-missing-ssh
 
@@ -63,9 +67,6 @@ devbox up <port> --devcontainer-subpath services/api
 # Rebuild/recreate the managed devcontainer
 devbox rebuild <port>
 
-# Reuse the last stored port for this workspace
-devbox up
-
 # Open an interactive shell in the running managed devcontainer for this workspace
 devbox shell
 
@@ -73,7 +74,13 @@ devbox shell
 devbox down
 ```
 
-There is no default port. If you omit the port for `up` or `rebuild`, `devbox` will reuse the last port stored for the current workspace; otherwise pass a port explicitly.
+When you run `devbox up`, the port precedence is:
+
+1. the explicit port you passed,
+2. the last stored port for the current workspace, or
+3. the first free port starting at `5001`.
+
+When you run `devbox rebuild`, omitting the port reuses the last stored port for the current workspace.
 
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
 
@@ -96,14 +103,14 @@ For a quick smoke test, this repository includes `examples/smoke-workspace/.devc
 
 ```bash
 cd examples/smoke-workspace
-../../dist/devbox.js up <port> --allow-missing-ssh
+../../dist/devbox.js up --allow-missing-ssh
 ```
 
 For a more realistic feature-heavy example, this repository also includes `examples/complex-workspace/.devcontainer/devcontainer.json`:
 
 ```bash
 cd examples/complex-workspace
-../../dist/devbox.js up <port>
+../../dist/devbox.js up
 ```
 
 The complex example uses several devcontainer features, so the first `up` or `rebuild` can take a while. `devbox` prints periodic elapsed-time progress lines while the devcontainer image/features are still being prepared and while the SSH runner is being installed.
@@ -113,10 +120,10 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
+- `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
 - `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
 - When the host already has Git author identity configured, `devbox` copies it into the container user's global Git config if the container does not already define those values.
-

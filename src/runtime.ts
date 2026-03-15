@@ -416,6 +416,23 @@ export async function assertPortAvailable(port: number, allowIfManagedContainerO
   throw new UserError(`Host port ${port} is already in use by PID(s): ${pids.join(", ")}.`);
 }
 
+export async function findFirstAvailablePort(
+  startPort: number,
+  isPortAvailable: (port: number) => Promise<boolean> = defaultIsPortAvailable,
+): Promise<number> {
+  if (!Number.isInteger(startPort) || startPort < 1 || startPort > 65535) {
+    throw new UserError(`Port must be between 1 and 65535. Received: ${startPort}`);
+  }
+
+  for (let port = startPort; port <= 65535; port += 1) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+
+  throw new UserError(`No available host port was found starting at ${startPort}.`);
+}
+
 export async function removeContainers(containerIds: string[]): Promise<void> {
   if (containerIds.length === 0) {
     return;
@@ -771,6 +788,11 @@ async function findListeningPids(port: number): Promise<string[]> {
   }
 
   return [];
+}
+
+async function defaultIsPortAvailable(port: number): Promise<boolean> {
+  const pids = await findListeningPids(port);
+  return pids.length === 0;
 }
 
 async function execute(command: string[], options: ExecOptions): Promise<ExecResult> {
