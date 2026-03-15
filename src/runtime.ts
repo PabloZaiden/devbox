@@ -119,20 +119,30 @@ export function formatDevcontainerProgressLine(line: string): string | null {
     }
 
     if (type === "raw" && text === "Container started") {
-      return "Container started.";
+      return "Container started. Finishing devcontainer setup...";
     }
 
     if (text.startsWith("workspace root: ")) {
       return `Workspace: ${text.slice("workspace root: ".length)}`;
     }
 
+    if (text === "Inspecting container") {
+      return "Inspecting container...";
+    }
+
+    if (text.startsWith("userEnvProbe")) {
+      return "Checking container environment...";
+    }
+
+    const lifecycleProgress = formatDevcontainerLifecycleProgress(text);
+    if (lifecycleProgress) {
+      return lifecycleProgress;
+    }
+
     if (
       text === "No user features to update" ||
-      text === "Inspecting container" ||
       text.startsWith("Run: ") ||
       text.startsWith("Run in container: ") ||
-      text.startsWith("userEnvProbe") ||
-      text.startsWith("LifecycleCommandExecutionMap:") ||
       text.startsWith("Exit code ")
     ) {
       return null;
@@ -675,6 +685,7 @@ async function consumeStream(
   stream.setEncoding("utf8");
   let captured = "";
   let buffered = "";
+  let lastRenderedProgressLine: string | null = null;
 
   for await (const chunk of stream) {
     const text = typeof chunk === "string" ? chunk : String(chunk);
@@ -694,13 +705,13 @@ async function consumeStream(
     while (newlineIndex >= 0) {
       const line = buffered.slice(0, newlineIndex);
       buffered = buffered.slice(newlineIndex + 1);
-      renderDevcontainerJsonLine(line, writer);
+      lastRenderedProgressLine = renderDevcontainerJsonLine(line, writer, lastRenderedProgressLine);
       newlineIndex = buffered.indexOf("\n");
     }
   }
 
   if (mode === "devcontainer-json" && buffered.length > 0) {
-    renderDevcontainerJsonLine(buffered, writer);
+    renderDevcontainerJsonLine(buffered, writer, lastRenderedProgressLine);
   }
 
   return captured;
@@ -744,11 +755,18 @@ function isExecutablePath(candidate: string): boolean {
   }
 }
 
-function renderDevcontainerJsonLine(line: string, writer: NodeJS.WriteStream): void {
+function renderDevcontainerJsonLine(
+  line: string,
+  writer: NodeJS.WriteStream,
+  previousLine: string | null,
+): string | null {
   const formatted = formatDevcontainerProgressLine(line);
-  if (formatted) {
+  if (formatted && formatted !== previousLine) {
     writer.write(`${formatted}\n`);
+    return formatted;
   }
+
+  return previousLine;
 }
 
 function parseDevcontainerOutcome(stdout: string): UpResult | null {
@@ -786,6 +804,21 @@ export function formatCommandError(error: CommandError): string {
 
 function stripAnsi(text: string): string {
   return text.replace(/\u001B\[[0-9;]*m/g, "");
+}
+
+function formatDevcontainerLifecycleProgress(text: string): string | null {
+  if (!text.startsWith("LifecycleCommandExecutionMap:")) {
+    return null;
+  }
+
+  const commandMatch = text.match(
+    /\b(initializeCommand|onCreateCommand|updateContentCommand|postCreateCommand|postStartCommand|postAttachCommand)\b/,
+  );
+  if (commandMatch) {
+    return `Running ${commandMatch[1]}...`;
+  }
+
+  return "Running devcontainer lifecycle commands...";
 }
 
 function looksLikeDevcontainerUserEnvProbeDump(text: string): boolean {

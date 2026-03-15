@@ -247,8 +247,22 @@ describe("formatDevcontainerProgressLine", () => {
       formatDevcontainerProgressLine('{"type":"start","level":2,"text":"Starting container"}'),
     ).toBe("Starting container...");
     expect(
+      formatDevcontainerProgressLine('{"type":"raw","level":1,"text":"Container started"}'),
+    ).toBe("Container started. Finishing devcontainer setup...");
+    expect(
       formatDevcontainerProgressLine('{"type":"text","level":1,"text":"workspace root: /tmp/ws"}'),
     ).toBe("Workspace: /tmp/ws");
+    expect(
+      formatDevcontainerProgressLine('{"type":"text","level":1,"text":"Inspecting container"}'),
+    ).toBe("Inspecting container...");
+    expect(
+      formatDevcontainerProgressLine('{"type":"text","level":1,"text":"userEnvProbe shell: /bin/bash"}'),
+    ).toBe("Checking container environment...");
+    expect(
+      formatDevcontainerProgressLine(
+        '{"type":"text","level":1,"text":"LifecycleCommandExecutionMap: {\\"postCreateCommand\\":\\"npm install\\"}"}',
+      ),
+    ).toBe("Running postCreateCommand...");
   });
 
   test("drops noisy low-level devcontainer log lines", () => {
