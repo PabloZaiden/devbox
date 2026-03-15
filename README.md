@@ -111,12 +111,3 @@ cd examples/smoke-workspace
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
 - When the host already has Git author identity configured, `devbox` copies it into the container user's global Git config if the container does not already define those values.
 
-## Releasing to npm
-
-Publishing is wired through `.github/workflows/release-npm-package.yml`.
-
-- Create a GitHub release tagged like `v1.2.3`.
-- The workflow checks out that tag, sets `package.json` to version `1.2.3`, installs dependencies, runs tests, builds the package, and publishes `@pablozaiden/devbox` to npm.
-- The workflow uses npm trusted publishing (`id-token: write`), so no npm token has to be stored in the repository.
-
-Before the first release, enable trusted publishing for `@pablozaiden/devbox` in npm and connect it to the `PabloZaiden/devbox` GitHub repository.
