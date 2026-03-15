@@ -7,6 +7,7 @@ import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
 import type { ParseError } from "jsonc-parser";
 import {
   CLI_NAME,
+  DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   KNOWN_HOSTS_TARGET,
   LEGACY_GENERATED_CONFIG_BASENAME,
   MANAGED_LABEL_KEY,
@@ -406,9 +407,10 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
   }
   managedConfig.runArgs = runArgs;
 
+  const containerSshAuthSock = getContainerSshAuthSockPath(options.sshAuthSock);
   const mounts = getStringArray(managedConfig.mounts, "mounts");
-  if (options.sshAuthSock) {
-    mounts.push(`type=bind,source=${options.sshAuthSock},target=${SSH_AUTH_SOCK_TARGET}`);
+  if (options.sshAuthSock && containerSshAuthSock) {
+    mounts.push(`type=bind,source=${options.sshAuthSock},target=${containerSshAuthSock}`);
   }
   if (options.knownHostsPath) {
     mounts.push(`type=bind,source=${options.knownHostsPath},target=${KNOWN_HOSTS_TARGET},readonly`);
@@ -416,8 +418,8 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
   managedConfig.mounts = dedupe(mounts);
 
   const containerEnv = getStringRecord(managedConfig.containerEnv, "containerEnv");
-  if (options.sshAuthSock) {
-    containerEnv.SSH_AUTH_SOCK = SSH_AUTH_SOCK_TARGET;
+  if (containerSshAuthSock) {
+    containerEnv.SSH_AUTH_SOCK = containerSshAuthSock;
   }
   managedConfig.containerEnv = containerEnv;
 
@@ -459,6 +461,14 @@ export async function getKnownHostsPath(): Promise<string | null> {
 
 export function quoteShell(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+}
+
+export function getContainerSshAuthSockPath(sshAuthSock: string | null): string | null {
+  if (!sshAuthSock) {
+    return null;
+  }
+
+  return sshAuthSock === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE ? DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE : SSH_AUTH_SOCK_TARGET;
 }
 
 function parseDevcontainerSubpath(raw: string): string {

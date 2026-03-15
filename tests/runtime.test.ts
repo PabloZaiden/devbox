@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import type { DockerInspect } from "../src/core";
 import {
+  buildAssertConfiguredSshAuthSockScript,
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
   buildInteractiveShellScript,
@@ -168,8 +169,16 @@ describe("Docker Desktop SSH socket fix", () => {
   });
 
   test("relaxes the mounted socket permissions inside the container", () => {
-    expect(buildEnsureSshAuthSockAccessibleScript()).toBe(
-      "if [ -S '/tmp/devbox-ssh-auth.sock' ]; then chmod 666 '/tmp/devbox-ssh-auth.sock'; fi",
+    expect(buildEnsureSshAuthSockAccessibleScript(DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE)).toBe(
+      "if [ -S '/run/host-services/ssh-auth.sock' ]; then chmod 666 '/run/host-services/ssh-auth.sock'; fi",
+    );
+  });
+
+  test("fails fast when SSH_AUTH_SOCK points to a missing socket", () => {
+    expect(buildAssertConfiguredSshAuthSockScript()).toContain('if [ -z "${SSH_AUTH_SOCK:-}" ]; then');
+    expect(buildAssertConfiguredSshAuthSockScript()).toContain('if [ -S "$SSH_AUTH_SOCK" ]; then');
+    expect(buildAssertConfiguredSshAuthSockScript()).toContain(
+      "Run devbox rebuild to refresh SSH agent sharing.",
     );
   });
 });
@@ -252,6 +261,17 @@ describe("formatDevcontainerProgressLine", () => {
     expect(
       formatDevcontainerProgressLine('{"type":"text","level":2,"text":"29.2.1"}'),
     ).toBeNull();
+  });
+
+  test("drops leaked env-probe dumps and bash job-control warnings", () => {
+    const probeDump =
+      "3a47c555-eed4-4f46-b2d8-d62c464a43e0HOSTNAME=3bbefbad0c97SSH_AUTH_SOCK=/tmp/devbox-ssh-auth.sockPWD=/HOME=/home/vscodePATH=/usr/local/binUSER=vscode3a47c555-eed4-4f46-b2d8-d62c464a43e0";
+
+    expect(formatDevcontainerProgressLine(probeDump)).toBeNull();
+    expect(
+      formatDevcontainerProgressLine("bash: cannot set terminal process group (-1): Inappropriate ioctl for device"),
+    ).toBeNull();
+    expect(formatDevcontainerProgressLine("bash: no job control in this shell")).toBeNull();
   });
 });
 

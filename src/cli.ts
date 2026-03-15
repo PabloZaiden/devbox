@@ -25,6 +25,7 @@ import {
   writeManagedConfig,
 } from "./core";
 import {
+  assertConfiguredSshAuthSockAvailable,
   assertPortAvailable,
   copyKnownHosts,
   devcontainerUp,
@@ -146,7 +147,10 @@ async function handleUpLike(
   await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME));
   if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
     console.log("Making the forwarded SSH agent socket accessible to the container user...");
-    await ensureSshAuthSockAccessible(upResult.containerId);
+    await ensureSshAuthSockAccessible(upResult.containerId, environment.sshAuthSock);
+  }
+  if (environment.sshAuthSock) {
+    await assertConfiguredSshAuthSockAvailable(upResult.containerId);
   }
   await copyKnownHosts(upResult.containerId);
   await stopManagedSshd(upResult.containerId);
@@ -194,6 +198,7 @@ async function handleShell(
     preferredContainerId: state?.lastContainerId,
   });
 
+  await assertConfiguredSshAuthSockAvailable(containerId);
   console.log(`Opening shell inside ${containerId.slice(0, 12)}...`);
   process.exitCode = await openInteractiveShell(containerId);
 }

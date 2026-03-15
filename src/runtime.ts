@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import {
   type DockerInspect,
   type UpResult,
+  getContainerSshAuthSockPath,
   UserError,
   quoteShell,
 } from "./core";
@@ -16,7 +17,6 @@ import {
   RUNNER_CRED_FILENAME,
   RUNNER_HOST_KEYS_DIRNAME,
   RUNNER_URL,
-  SSH_AUTH_SOCK_TARGET,
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 
@@ -82,6 +82,14 @@ export function formatDevcontainerProgressLine(line: string): string | null {
     return null;
   }
 
+  if (
+    looksLikeDevcontainerUserEnvProbeDump(cleaned) ||
+    cleaned.startsWith("bash: cannot set terminal process group") ||
+    cleaned === "bash: no job control in this shell"
+  ) {
+    return null;
+  }
+
   try {
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
     const text = typeof parsed.text === "string" ? stripAnsi(parsed.text).trim() : "";
@@ -144,8 +152,21 @@ export function requiresSshAuthSockPermissionFix(sshAuthSockSource: string | nul
   return sshAuthSockSource === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE;
 }
 
-export function buildEnsureSshAuthSockAccessibleScript(): string {
-  return `if [ -S ${quoteShell(SSH_AUTH_SOCK_TARGET)} ]; then chmod 666 ${quoteShell(SSH_AUTH_SOCK_TARGET)}; fi`;
+export function buildEnsureSshAuthSockAccessibleScript(containerSshAuthSock: string): string {
+  return `if [ -S ${quoteShell(containerSshAuthSock)} ]; then chmod 666 ${quoteShell(containerSshAuthSock)}; fi`;
+}
+
+export function buildAssertConfiguredSshAuthSockScript(): string {
+  return [
+    'if [ -z "${SSH_AUTH_SOCK:-}" ]; then',
+    "  exit 0",
+    "fi",
+    'if [ -S "$SSH_AUTH_SOCK" ]; then',
+    "  exit 0",
+    "fi",
+    'printf \'%s\\n\' "SSH_AUTH_SOCK points to a missing socket inside the container: $SSH_AUTH_SOCK. Run devbox rebuild to refresh SSH agent sharing." >&2',
+    "exit 1",
+  ].join("\n");
 }
 
 export function buildInteractiveShellScript(): string {
@@ -385,10 +406,24 @@ export async function stopManagedSshd(containerId: string): Promise<void> {
   await devcontainerExec(containerId, buildStopManagedSshdScript(), { quiet: true });
 }
 
-export async function ensureSshAuthSockAccessible(containerId: string): Promise<void> {
-  await dockerExec(containerId, buildEnsureSshAuthSockAccessibleScript(), {
+export async function ensureSshAuthSockAccessible(
+  containerId: string,
+  sshAuthSockSource: string | null,
+): Promise<void> {
+  const containerSshAuthSock = getContainerSshAuthSockPath(sshAuthSockSource);
+  if (!containerSshAuthSock) {
+    throw new UserError("Cannot adjust SSH agent socket permissions when SSH sharing is disabled.");
+  }
+
+  await dockerExec(containerId, buildEnsureSshAuthSockAccessibleScript(containerSshAuthSock), {
     quiet: true,
     user: "root",
+  });
+}
+
+export async function assertConfiguredSshAuthSockAvailable(containerId: string): Promise<void> {
+  await dockerExec(containerId, buildAssertConfiguredSshAuthSockScript(), {
+    quiet: true,
   });
 }
 
@@ -751,6 +786,15 @@ export function formatCommandError(error: CommandError): string {
 
 function stripAnsi(text: string): string {
   return text.replace(/\u001B\[[0-9;]*m/g, "");
+}
+
+function looksLikeDevcontainerUserEnvProbeDump(text: string): boolean {
+  const match = text.match(/^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})([\s\S]*)\1$/i);
+  if (!match) {
+    return false;
+  }
+
+  return /\b(?:HOME|HOSTNAME|PATH|PWD|SHLVL|SSH_AUTH_SOCK|USER)=/.test(match[2]);
 }
 
 export function labelsForWorkspaceHash(workspaceHash: string): Record<string, string> {

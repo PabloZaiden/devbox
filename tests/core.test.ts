@@ -2,10 +2,12 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
+import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import {
   buildManagedConfig,
   discoverDevcontainerConfig,
   getDefaultRemoteWorkspaceFolder,
+  getContainerSshAuthSockPath,
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
   getManagedContainerName,
@@ -212,6 +214,27 @@ describe("buildManagedConfig", () => {
     });
   });
 
+  test("keeps the Docker Desktop SSH socket path inside the container", () => {
+    const managed = buildManagedConfig(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      },
+      {
+        port: 5001,
+        containerName: "devbox-example-5001",
+        sshAuthSock: DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+        knownHostsPath: null,
+      },
+    );
+
+    expect(managed.mounts).toEqual([
+      `type=bind,source=${DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE},target=${DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE}`,
+    ]);
+    expect(managed.containerEnv).toEqual({
+      SSH_AUTH_SOCK: DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+    });
+  });
+
   test("does not duplicate existing published port", () => {
     const managed = buildManagedConfig(
       {
@@ -227,6 +250,16 @@ describe("buildManagedConfig", () => {
     );
 
     expect(managed.runArgs).toEqual(["-p", "5001:5001", "--name", "devbox-example-5001"]);
+  });
+});
+
+describe("getContainerSshAuthSockPath", () => {
+  test("uses a stable tmp path for host sockets and preserves Docker Desktop host services", () => {
+    expect(getContainerSshAuthSockPath("/tmp/agent.sock")).toBe("/tmp/devbox-ssh-auth.sock");
+    expect(getContainerSshAuthSockPath(DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE)).toBe(
+      DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+    );
+    expect(getContainerSshAuthSockPath(null)).toBeNull();
   });
 });
 
