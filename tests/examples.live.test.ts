@@ -22,14 +22,8 @@ const cliPath = path.join(repoRoot, "src", "cli.ts");
 const tempPaths: string[] = [];
 const cleanupTasks: Array<() => Promise<void>> = [];
 const skipLiveIntegration = process.env.DEVBOX_SKIP_LIVE_EXAMPLE_TESTS === "1";
-
-if (!skipLiveIntegration && !canRunLivePrerequisites()) {
-  throw new Error(
-    "Live example workspace tests require a working Docker daemon and the Dev Containers CLI in PATH. Set DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 to skip them.",
-  );
-}
-
-const liveTest = skipLiveIntegration ? test.skip : test.serial;
+const canRunLiveIntegration = !skipLiveIntegration && canRunLivePrerequisites();
+const liveTest = canRunLiveIntegration ? test.serial : test.skip;
 
 interface CommandResult {
   exitCode: number;

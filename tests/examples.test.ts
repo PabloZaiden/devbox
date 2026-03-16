@@ -315,6 +315,25 @@ function handleDevcontainer() {
     if (script.includes("SSH_PORT=") && script.includes("CRED_FILE=")) {
       const match = script.match(/SSH_PORT='([^']+)'/);
       const port = match ? match[1] : "22";
+      const credFileMatch = script.match(/CRED_FILE='([^']+)'/);
+      const credentialFile = credFileMatch ? credFileMatch[1] : null;
+      const container = containerId ? state.containers[containerId] : null;
+      if (credentialFile && container?.workspacePath && container?.remoteWorkspaceFolder) {
+        const relativeCredentialPath = path.posix.relative(container.remoteWorkspaceFolder, credentialFile);
+        const hostCredentialPath = path.join(container.workspacePath, relativeCredentialPath);
+        mkdirSync(path.dirname(hostCredentialPath), { recursive: true });
+        writeFileSync(
+          hostCredentialPath,
+          [
+            "SSH user: root",
+            "SSH pass: password",
+            "SSH port: " + port,
+            "PermitRootLogin: yes",
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+      }
       console.log("SSH user: root");
       console.log("SSH pass: password");
       console.log("SSH port: " + port);
@@ -385,22 +404,42 @@ describe("example workspaces (simulated host tools)", () => {
     const excludeContent = await readFile(path.join(fixture.workspacePath, ".git", "info", "exclude"), "utf8");
     expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
 
-    const shell = runCli(fixture, ["shell"]);
-    expect(shell.exitCode).toBe(0);
-    expect(shell.stdout).toContain("Opening shell inside ");
+     const shell = runCli(fixture, ["shell"]);
+     expect(shell.exitCode).toBe(0);
+     expect(shell.stdout).toContain("Opening shell inside ");
 
-    const commandsAfterShell = await readCommandLog(fixture.commandLogPath);
-    expect(
+     const statusWhileRunning = runCli(fixture, ["status"]);
+     expect(statusWhileRunning.exitCode).toBe(0);
+     const runningStatus = JSON.parse(statusWhileRunning.stdout);
+     expect(runningStatus.running).toBe(true);
+     expect(runningStatus.port).toBe(5001);
+     expect(runningStatus.password).toBe("password");
+     expect(runningStatus.workdir).toBe("/workspaces/smoke-workspace");
+     expect(runningStatus.containerCount).toBe(1);
+     expect(runningStatus.hasStateFile).toBe(true);
+     expect(runningStatus.hasCredentialFile).toBe(true);
+
+     const commandsAfterShell = await readCommandLog(fixture.commandLogPath);
+     expect(
       commandsAfterShell.some(
         (entry) => entry.tool === "devcontainer" && entry.args[0] === "exec" && entry.script === buildInteractiveShellScript(),
       ),
     ).toBe(true);
 
-    const down = runCli(fixture, ["down"]);
-    expect(down.exitCode).toBe(0);
-    expect(down.stdout).toContain("Removed 1 managed container(s).");
-    expect(existsSync(fixture.generatedConfigPath)).toBe(false);
-    expect(existsSync(fixture.statePath)).toBe(false);
+     const down = runCli(fixture, ["down"]);
+     expect(down.exitCode).toBe(0);
+     expect(down.stdout).toContain("Removed 1 managed container(s).");
+     expect(existsSync(fixture.generatedConfigPath)).toBe(false);
+     expect(existsSync(fixture.statePath)).toBe(false);
+
+     const statusAfterDown = runCli(fixture, ["status"]);
+     expect(statusAfterDown.exitCode).toBe(0);
+     const stoppedStatus = JSON.parse(statusAfterDown.stdout);
+     expect(stoppedStatus.running).toBe(false);
+     expect(stoppedStatus.port).toBe(5001);
+     expect(stoppedStatus.password).toBe("password");
+     expect(stoppedStatus.hasStateFile).toBe(false);
+     expect(stoppedStatus.hasCredentialFile).toBe(true);
   });
 
   test("complex workspace preserves features and supports rebuild via the CLI", async () => {

@@ -55,6 +55,7 @@ import {
   stopManagedSshd,
 } from "./runtime";
 import { DEFAULT_UP_AUTO_PORT_START, DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, RUNNER_HOST_KEYS_DIRNAME } from "./constants";
+import { getDevboxStatus } from "./status";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
@@ -68,6 +69,11 @@ async function main(): Promise<void> {
 
   if (parsed.command === "shell") {
     await handleShell(workspacePath, state);
+    return;
+  }
+
+  if (parsed.command === "status") {
+    await handleStatus(workspacePath, state);
     return;
   }
 
@@ -292,6 +298,14 @@ async function handleDown(
   console.log(
     `Removed ${containerIds.length} managed container(s). Workspace-mounted SSH credentials and host keys were preserved.`,
   );
+}
+
+async function handleStatus(
+  workspacePath: string,
+  state: Awaited<ReturnType<typeof loadWorkspaceState>>,
+): Promise<void> {
+  const status = await getDevboxStatus({ workspacePath, state });
+  console.log(JSON.stringify(status, null, 2));
 }
 
 function getPublishedHostPorts(container: DockerInspect): number[] {
