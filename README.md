@@ -158,7 +158,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
-- `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` file when the container is stopped.
+- `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` file when the container is stopped or Docker is unavailable.
 - `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
 - `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.

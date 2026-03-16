@@ -12,7 +12,7 @@ import {
   loadWorkspaceState,
 } from "./core";
 import { RUNNER_CRED_FILENAME } from "./constants";
-import { inspectContainers, listManagedContainers } from "./runtime";
+import { formatCommandError, inspectContainers, isCommandError, isExecutableAvailable, listManagedContainers } from "./runtime";
 
 export interface DevboxStatusPortBinding {
   hostIp: string | null;
@@ -68,12 +68,14 @@ interface StatusDependencies {
   listManagedContainers?: (labels: Record<string, string>) => Promise<string[]>;
   loadWorkspaceState?: (workspacePath: string) => Promise<WorkspaceState | null>;
   readFile?: (filePath: string) => Promise<string>;
+  isDockerAvailable?: () => boolean;
 }
 
 export async function getDevboxStatus(
   input: {
     workspacePath: string;
     state?: WorkspaceState | null;
+    warnings?: string[];
   },
   deps: StatusDependencies = {},
 ): Promise<DevboxStatus> {
@@ -81,13 +83,19 @@ export async function getDevboxStatus(
   const readFile = deps.readFile ?? defaultReadFile;
   const listContainers = deps.listManagedContainers ?? listManagedContainers;
   const inspect = deps.inspectContainers ?? inspectContainers;
+  const isDockerAvailable = deps.isDockerAvailable ?? (() => isExecutableAvailable("docker"));
 
   const state = input.state === undefined ? await loadState(input.workspacePath) : input.state;
   const workspaceHash = state?.workspaceHash ?? hashWorkspacePath(input.workspacePath);
   const labels = state?.labels ?? getManagedLabels(workspaceHash);
-  const containerIds = await listContainers(labels);
-  const containers = await inspect(containerIds);
-  const warnings: string[] = [];
+  const warnings = [...(input.warnings ?? [])];
+  const containers = await loadManagedContainers({
+    inspect,
+    isDockerAvailable,
+    labels,
+    listContainers,
+    warnings,
+  });
   const primaryContainer = selectPrimaryContainer(containers, state?.lastContainerId);
 
   if (containers.length > 1) {
@@ -103,7 +111,10 @@ export async function getDevboxStatus(
     workspacePath: input.workspacePath,
   });
   const publishedPorts = getPublishedPorts(primaryContainer);
-  const effectivePort = firstPublishedHostPort(publishedPorts) ?? state?.port ?? credentials?.sshPort ?? null;
+  const preferredPort = state?.port ?? credentials?.sshPort ?? null;
+  const effectivePort = preferredPort === null
+    ? firstPublishedHostPort(publishedPorts)
+    : getPublishedHostPortForPort(publishedPorts, preferredPort) ?? preferredPort;
 
   return {
     running: Boolean(primaryContainer?.State?.Running),
@@ -113,7 +124,7 @@ export async function getDevboxStatus(
     workdirSource: configHints.workdirSource,
     workspacePath: input.workspacePath,
     workspaceHash,
-    containerId: primaryContainer?.Id ?? state?.lastContainerId ?? null,
+    containerId: primaryContainer?.Id ?? null,
     containerName: normalizeContainerName(primaryContainer?.Name),
     containerState: primaryContainer?.State?.Status ?? null,
     containerCount: containers.length,
@@ -213,12 +224,12 @@ async function readConfigHints(input: {
 
     if (errors.length > 0) {
       input.warnings.push(`Could not parse devcontainer config for status hints: ${candidate}.`);
-      break;
+      continue;
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       input.warnings.push(`Devcontainer config for status hints was not a JSON object: ${candidate}.`);
-      break;
+      continue;
     }
 
     const config = parsed as Record<string, unknown>;
@@ -286,6 +297,30 @@ function normalizeContainerName(name: string | undefined): string | null {
   return name.replace(/^\//, "");
 }
 
+async function loadManagedContainers(input: {
+  isDockerAvailable: () => boolean;
+  labels: Record<string, string>;
+  listContainers: (labels: Record<string, string>) => Promise<string[]>;
+  inspect: (containerIds: string[]) => Promise<DockerInspect[]>;
+  warnings: string[];
+}): Promise<DockerInspect[]> {
+  if (!input.isDockerAvailable()) {
+    input.warnings.push("Docker was not found in PATH; reporting saved workspace state and credentials only.");
+    return [];
+  }
+
+  try {
+    const containerIds = await input.listContainers(input.labels);
+    return await input.inspect(containerIds);
+  } catch (error) {
+    if (isCommandError(error)) {
+      input.warnings.push(`Docker status lookup failed; reporting saved workspace state and credentials only. ${formatCommandError(error)}`);
+      return [];
+    }
+    throw error;
+  }
+}
+
 function getPublishedPorts(container: DockerInspect | null): Record<string, DevboxStatusPortBinding[]> {
   if (!container) {
     return {};
@@ -302,6 +337,20 @@ function getPublishedPorts(container: DockerInspect | null): Record<string, Devb
   }
 
   return publishedPorts;
+}
+
+function getPublishedHostPortForPort(
+  publishedPorts: Record<string, DevboxStatusPortBinding[]>,
+  port: number,
+): number | null {
+  const bindings = publishedPorts[`${port}/tcp`] ?? [];
+  for (const binding of bindings) {
+    if (binding.hostPort !== null) {
+      return binding.hostPort;
+    }
+  }
+
+  return null;
 }
 
 function firstPublishedHostPort(publishedPorts: Record<string, DevboxStatusPortBinding[]>): number | null {
