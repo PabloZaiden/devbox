@@ -1,9 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import type { DockerInspect, WorkspaceState } from "../src/core";
-import { getDevboxStatus, parseRunnerCredentials } from "../src/status";
+import { createRunnerMetadata, parseRunnerCredentials, serializeRunnerMetadata } from "../src/runnerState";
+import { getDevboxStatus } from "../src/status";
 
 describe("parseRunnerCredentials", () => {
-  test("extracts runner credentials from the persisted file content", () => {
+  test("extracts a password from the password-only persisted file", () => {
+    expect(parseRunnerCredentials("secret\n")).toEqual({
+      user: null,
+      password: "secret",
+      sshPort: null,
+      permitRootLogin: null,
+    });
+  });
+
+  test("extracts runner credentials from a legacy summary format", () => {
     expect(
       parseRunnerCredentials(
         ["SSH user: vscode", "SSH pass: secret", "SSH port: 5007", "PermitRootLogin: no", ""].join("\n"),
@@ -13,6 +23,19 @@ describe("parseRunnerCredentials", () => {
       password: "secret",
       sshPort: 5007,
       permitRootLogin: false,
+    });
+  });
+
+  test("extracts runner credentials from a legacy key-value format", () => {
+    expect(
+      parseRunnerCredentials(
+        ["user=root", "pass=password", "port=5007", "permitRootLogin=yes", ""].join("\n"),
+      ),
+    ).toEqual({
+      user: "root",
+      password: "password",
+      sshPort: 5007,
+      permitRootLogin: true,
     });
   });
 });
@@ -59,7 +82,16 @@ describe("getDevboxStatus", () => {
         inspectContainers: async () => containers,
         readFile: async (filePath) => {
           if (filePath === "/tmp/ws/.sshcred") {
-            return ["SSH user: vscode", "SSH pass: secret", "SSH port: 5001", "PermitRootLogin: no", ""].join("\n");
+            return "secret\n";
+          }
+          if (filePath === "/tmp/ws/.devbox-ssh.json") {
+            return serializeRunnerMetadata(
+              createRunnerMetadata({
+                sshUser: "vscode",
+                sshPort: 5001,
+                permitRootLogin: false,
+              }),
+            );
           }
           if (filePath === state.sourceConfigPath) {
             return '{ "workspaceFolder": "/custom/workdir", "remoteUser": "vscode" }';
@@ -74,17 +106,21 @@ describe("getDevboxStatus", () => {
     expect(status.running).toBe(true);
     expect(status.port).toBe(5001);
     expect(status.password).toBe("secret");
+    expect(status.sshUser).toBe("vscode");
+    expect(status.sshPort).toBe(5001);
+    expect(status.permitRootLogin).toBe(false);
     expect(status.workdir).toBe("/custom/workdir");
     expect(status.workdirSource).toBe("config");
     expect(status.remoteUser).toBe("vscode");
     expect(status.containerId).toBe("container-2");
     expect(status.containerCount).toBe(2);
+    expect(status.hasSshMetadataFile).toBe(true);
     expect(status.warnings).toEqual([
       "Found 2 managed containers for this workspace; reporting the preferred container.",
     ]);
   });
 
-  test("falls back to default workdir and credential data without saved state", async () => {
+  test("falls back to default workdir, password file, and metadata file without saved state", async () => {
     const status = await getDevboxStatus(
       {
         workspacePath: "/tmp/no-state",
@@ -95,7 +131,16 @@ describe("getDevboxStatus", () => {
         inspectContainers: async () => [],
         readFile: async (filePath) => {
           if (filePath === "/tmp/no-state/.sshcred") {
-            return ["SSH user: root", "SSH pass: password", "SSH port: 5010", "PermitRootLogin: yes", ""].join("\n");
+            return "password\n";
+          }
+          if (filePath === "/tmp/no-state/.devbox-ssh.json") {
+            return serializeRunnerMetadata(
+              createRunnerMetadata({
+                sshUser: "root",
+                sshPort: 5010,
+                permitRootLogin: true,
+              }),
+            );
           }
           const error = new Error(`Missing file: ${filePath}`) as Error & { code?: string };
           error.code = "ENOENT";
@@ -107,10 +152,17 @@ describe("getDevboxStatus", () => {
     expect(status.running).toBe(false);
     expect(status.port).toBe(5010);
     expect(status.password).toBe("password");
+    expect(status.sshUser).toBe("root");
+    expect(status.sshPort).toBe(5010);
+    expect(status.permitRootLogin).toBe(true);
     expect(status.workdir).toBe("/workspaces/no-state");
     expect(status.workdirSource).toBe("default");
     expect(status.hasStateFile).toBe(false);
     expect(status.hasCredentialFile).toBe(true);
+    expect(status.hasSshMetadataFile).toBe(true);
+    expect(status.warnings).toEqual([
+      "`remoteUser` is unavailable because the devcontainer config does not set `remoteUser` or `containerUser`.",
+    ]);
   });
 
   test("continues to later config candidates after a parse error", async () => {
@@ -226,6 +278,64 @@ describe("getDevboxStatus", () => {
     expect(status.containerCount).toBe(0);
   });
 
+  test("explains missing SSH metadata when only the runner password file is present", async () => {
+    const status = await getDevboxStatus(
+      {
+        workspacePath: "/tmp/password-only",
+        state: {
+          version: 1,
+          workspacePath: "/tmp/password-only",
+          workspaceHash: "workspace-hash",
+          port: 5005,
+          sourceConfigPath: "/tmp/password-only/.devcontainer/devcontainer.json",
+          generatedConfigPath: "/tmp/password-only/.devcontainer/.devcontainer.json",
+          labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
+          userDataDir: "/tmp/state",
+          lastContainerId: "container-1",
+          updatedAt: "2026-03-16T00:00:00.000Z",
+        },
+      },
+      {
+        listManagedContainers: async () => ["container-1"],
+        inspectContainers: async () => [
+          {
+            Id: "container-1",
+            Name: "/devbox-password-only-5005",
+            State: { Running: true, Status: "running" },
+            NetworkSettings: {
+              Ports: {
+                "5005/tcp": [{ HostIp: "0.0.0.0", HostPort: "5005" }],
+              },
+            },
+          },
+        ],
+        readFile: async (filePath) => {
+          if (filePath === "/tmp/password-only/.sshcred") {
+            return "password\n";
+          }
+          if (filePath === "/tmp/password-only/.devcontainer/devcontainer.json") {
+            return '{ "workspaceFolder": "/custom/workdir" }';
+          }
+          const error = new Error(`Missing file: ${filePath}`) as Error & { code?: string };
+          error.code = "ENOENT";
+          throw error;
+        },
+      },
+    );
+
+    expect(status.password).toBe("password");
+    expect(status.sshPort).toBe(5005);
+    expect(status.sshUser).toBeNull();
+    expect(status.permitRootLogin).toBeNull();
+    expect(status.hasSshMetadataFile).toBe(false);
+    expect(status.warnings).toContain(
+      "Devbox SSH metadata file was not found: /tmp/password-only/.devbox-ssh.json. `sshUser` and `permitRootLogin` are unavailable. Start the workspace again with this devbox version to persist them.",
+    );
+    expect(status.warnings).toContain(
+      "`remoteUser` is unavailable because the devcontainer config does not set `remoteUser` or `containerUser`.",
+    );
+  });
+
   test("prefers the stored SSH port binding over unrelated published ports", async () => {
     const status = await getDevboxStatus(
       {
@@ -267,6 +377,7 @@ describe("getDevboxStatus", () => {
     );
 
     expect(status.port).toBe(15001);
+    expect(status.sshPort).toBe(5001);
     expect(status.publishedPorts["3000/tcp"]?.[0]?.hostPort).toBe(3000);
     expect(status.publishedPorts["5001/tcp"]?.[0]?.hostPort).toBe(15001);
   });
@@ -287,7 +398,16 @@ describe("getDevboxStatus", () => {
         },
         readFile: async (filePath) => {
           if (filePath === "/tmp/docker-missing/.sshcred") {
-            return ["SSH user: root", "SSH pass: password", "SSH port: 5010", "PermitRootLogin: yes", ""].join("\n");
+            return "password\n";
+          }
+          if (filePath === "/tmp/docker-missing/.devbox-ssh.json") {
+            return serializeRunnerMetadata(
+              createRunnerMetadata({
+                sshUser: "root",
+                sshPort: 5010,
+                permitRootLogin: true,
+              }),
+            );
           }
           const error = new Error(`Missing file: ${filePath}`) as Error & { code?: string };
           error.code = "ENOENT";
@@ -300,7 +420,7 @@ describe("getDevboxStatus", () => {
     expect(status.containerCount).toBe(0);
     expect(status.port).toBe(5010);
     expect(status.warnings).toContain(
-      "Docker was not found in PATH; reporting saved workspace state and credentials only.",
+      "Docker was not found in PATH; reporting saved workspace state and persisted SSH files only.",
     );
   });
 });

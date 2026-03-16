@@ -324,13 +324,7 @@ function handleDevcontainer() {
         mkdirSync(path.dirname(hostCredentialPath), { recursive: true });
         writeFileSync(
           hostCredentialPath,
-          [
-            "SSH user: root",
-            "SSH pass: password",
-            "SSH port: " + port,
-            "PermitRootLogin: yes",
-            "",
-          ].join("\n"),
+          "password\n",
           "utf8",
         );
       }
@@ -403,43 +397,46 @@ describe("example workspaces (simulated host tools)", () => {
 
     const excludeContent = await readFile(path.join(fixture.workspacePath, ".git", "info", "exclude"), "utf8");
     expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
+    expect(excludeContent).toContain("/.devbox-ssh.json");
 
-     const shell = runCli(fixture, ["shell"]);
-     expect(shell.exitCode).toBe(0);
-     expect(shell.stdout).toContain("Opening shell inside ");
+    const shell = runCli(fixture, ["shell"]);
+    expect(shell.exitCode).toBe(0);
+    expect(shell.stdout).toContain("Opening shell inside ");
 
-     const statusWhileRunning = runCli(fixture, ["status"]);
-     expect(statusWhileRunning.exitCode).toBe(0);
-     const runningStatus = JSON.parse(statusWhileRunning.stdout);
-     expect(runningStatus.running).toBe(true);
-     expect(runningStatus.port).toBe(5001);
-     expect(runningStatus.password).toBe("password");
-     expect(runningStatus.workdir).toBe("/workspaces/smoke-workspace");
-     expect(runningStatus.containerCount).toBe(1);
-     expect(runningStatus.hasStateFile).toBe(true);
-     expect(runningStatus.hasCredentialFile).toBe(true);
+    const statusWhileRunning = runCli(fixture, ["status"]);
+    expect(statusWhileRunning.exitCode).toBe(0);
+    const runningStatus = JSON.parse(statusWhileRunning.stdout);
+    expect(runningStatus.running).toBe(true);
+    expect(runningStatus.port).toBe(5001);
+    expect(runningStatus.password).toBe("password");
+    expect(runningStatus.workdir).toBe("/workspaces/smoke-workspace");
+    expect(runningStatus.containerCount).toBe(1);
+    expect(runningStatus.hasStateFile).toBe(true);
+    expect(runningStatus.hasCredentialFile).toBe(true);
+    expect(runningStatus.hasSshMetadataFile).toBe(true);
 
-     const commandsAfterShell = await readCommandLog(fixture.commandLogPath);
-     expect(
+    const commandsAfterShell = await readCommandLog(fixture.commandLogPath);
+    expect(
       commandsAfterShell.some(
         (entry) => entry.tool === "devcontainer" && entry.args[0] === "exec" && entry.script === buildInteractiveShellScript(),
       ),
     ).toBe(true);
 
-     const down = runCli(fixture, ["down"]);
-     expect(down.exitCode).toBe(0);
-     expect(down.stdout).toContain("Removed 1 managed container(s).");
-     expect(existsSync(fixture.generatedConfigPath)).toBe(false);
-     expect(existsSync(fixture.statePath)).toBe(false);
+    const down = runCli(fixture, ["down"]);
+    expect(down.exitCode).toBe(0);
+    expect(down.stdout).toContain("Removed 1 managed container(s).");
+    expect(existsSync(fixture.generatedConfigPath)).toBe(false);
+    expect(existsSync(fixture.statePath)).toBe(false);
 
-     const statusAfterDown = runCli(fixture, ["status"]);
-     expect(statusAfterDown.exitCode).toBe(0);
-     const stoppedStatus = JSON.parse(statusAfterDown.stdout);
-     expect(stoppedStatus.running).toBe(false);
-     expect(stoppedStatus.port).toBe(5001);
-     expect(stoppedStatus.password).toBe("password");
-     expect(stoppedStatus.hasStateFile).toBe(false);
-     expect(stoppedStatus.hasCredentialFile).toBe(true);
+    const statusAfterDown = runCli(fixture, ["status"]);
+    expect(statusAfterDown.exitCode).toBe(0);
+    const stoppedStatus = JSON.parse(statusAfterDown.stdout);
+    expect(stoppedStatus.running).toBe(false);
+    expect(stoppedStatus.port).toBe(5001);
+    expect(stoppedStatus.password).toBe("password");
+    expect(stoppedStatus.hasStateFile).toBe(false);
+    expect(stoppedStatus.hasCredentialFile).toBe(true);
+    expect(stoppedStatus.hasSshMetadataFile).toBe(true);
   });
 
   test("complex workspace preserves features and supports rebuild via the CLI", async () => {

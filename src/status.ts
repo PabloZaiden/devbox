@@ -7,11 +7,13 @@ import {
   type WorkspaceState,
   getDefaultRemoteWorkspaceFolder,
   getManagedLabels,
+  getManagedPortFromContainerName,
   getWorkspaceStateFile,
   hashWorkspacePath,
   loadWorkspaceState,
 } from "./core";
-import { RUNNER_CRED_FILENAME } from "./constants";
+import { DEVBOX_SSH_METADATA_FILENAME, RUNNER_CRED_FILENAME } from "./constants";
+import { parseRunnerCredentials, parseRunnerMetadata, type RunnerCredentials, type RunnerMetadata } from "./runnerState";
 import { formatCommandError, inspectContainers, isCommandError, isExecutableAvailable, listManagedContainers } from "./runtime";
 
 export interface DevboxStatusPortBinding {
@@ -42,18 +44,13 @@ export interface DevboxStatus {
   statePath: string;
   hasCredentialFile: boolean;
   credentialPath: string;
+  hasSshMetadataFile: boolean;
+  sshMetadataPath: string;
   sourceConfigPath: string | null;
   generatedConfigPath: string | null;
   userDataDir: string | null;
   updatedAt: string | null;
   warnings: string[];
-}
-
-export interface RunnerCredentials {
-  user: string | null;
-  password: string | null;
-  sshPort: number | null;
-  permitRootLogin: boolean | null;
 }
 
 interface ConfigHints {
@@ -69,6 +66,11 @@ interface StatusDependencies {
   loadWorkspaceState?: (workspacePath: string) => Promise<WorkspaceState | null>;
   readFile?: (filePath: string) => Promise<string>;
   isDockerAvailable?: () => boolean;
+}
+
+interface OptionalParsedFile<T> {
+  exists: boolean;
+  value: T | null;
 }
 
 export async function getDevboxStatus(
@@ -103,7 +105,9 @@ export async function getDevboxStatus(
   }
 
   const credentialPath = path.join(input.workspacePath, RUNNER_CRED_FILENAME);
-  const credentials = await readRunnerCredentialsFile(credentialPath, readFile);
+  const credentialFile = await readRunnerCredentialsFile(credentialPath, readFile);
+  const sshMetadataPath = path.join(input.workspacePath, DEVBOX_SSH_METADATA_FILENAME);
+  const sshMetadataFile = await readRunnerMetadataFile(sshMetadataPath, readFile, warnings);
   const configHints = await readConfigHints({
     readFile,
     sourceConfigPath: state?.sourceConfigPath ?? null,
@@ -111,15 +115,35 @@ export async function getDevboxStatus(
     workspacePath: input.workspacePath,
   });
   const publishedPorts = getPublishedPorts(primaryContainer);
-  const preferredPort = state?.port ?? credentials?.sshPort ?? null;
-  const effectivePort = preferredPort === null
+  const configuredSshPort =
+    state?.port
+    ?? sshMetadataFile.value?.sshPort
+    ?? credentialFile.value?.sshPort
+    ?? getManagedPortFromContainerName(primaryContainer?.Name)
+    ?? null;
+  const effectivePort = configuredSshPort === null
     ? firstPublishedHostPort(publishedPorts)
-    : getPublishedHostPortForPort(publishedPorts, preferredPort) ?? preferredPort;
+    : getPublishedHostPortForPort(publishedPorts, configuredSshPort) ?? configuredSshPort;
+  const sshUser = sshMetadataFile.value?.sshUser ?? credentialFile.value?.user ?? null;
+  const permitRootLogin = sshMetadataFile.value?.permitRootLogin ?? credentialFile.value?.permitRootLogin ?? null;
+  const password = credentialFile.value?.password ?? null;
+  appendMissingDataWarnings({
+    warnings,
+    credentialFile,
+    credentialPath,
+    password,
+    sshMetadataFile,
+    sshMetadataPath,
+    sshUser,
+    sshPort: configuredSshPort,
+    permitRootLogin,
+    remoteUser: configHints.remoteUser,
+  });
 
   return {
     running: Boolean(primaryContainer?.State?.Running),
     port: effectivePort,
-    password: credentials?.password ?? null,
+    password,
     workdir: configHints.workdir ?? getDefaultRemoteWorkspaceFolder(input.workspacePath),
     workdirSource: configHints.workdirSource,
     workspacePath: input.workspacePath,
@@ -129,16 +153,18 @@ export async function getDevboxStatus(
     containerState: primaryContainer?.State?.Status ?? null,
     containerCount: containers.length,
     lastContainerId: state?.lastContainerId ?? null,
-    sshUser: credentials?.user ?? null,
-    sshPort: credentials?.sshPort ?? null,
-    permitRootLogin: credentials?.permitRootLogin ?? null,
+    sshUser,
+    sshPort: configuredSshPort,
+    permitRootLogin,
     remoteUser: configHints.remoteUser,
     labels,
     publishedPorts,
     hasStateFile: state !== null,
     statePath: getWorkspaceStateFile(input.workspacePath),
-    hasCredentialFile: credentials !== null,
+    hasCredentialFile: credentialFile.exists,
     credentialPath,
+    hasSshMetadataFile: sshMetadataFile.exists,
+    sshMetadataPath,
     sourceConfigPath: state?.sourceConfigPath ?? configHints.sourceConfigPath,
     generatedConfigPath: state?.generatedConfigPath ?? null,
     userDataDir: state?.userDataDir ?? null,
@@ -147,54 +173,47 @@ export async function getDevboxStatus(
   };
 }
 
-export function parseRunnerCredentials(content: string): RunnerCredentials {
-  const lines = content.split(/\r?\n/);
-  const map = new Map<string, string>();
-
-  for (const line of lines) {
-    const match = line.match(/^(SSH user|SSH pass|SSH port|PermitRootLogin):\s*(.*)$/);
-    if (!match) {
-      continue;
-    }
-    map.set(match[1], match[2]);
-  }
-
-  const portValue = map.get("SSH port");
-  const parsedPort = portValue && /^\d+$/.test(portValue) ? Number(portValue) : null;
-  const permitRootLogin = parsePermitRootLogin(map.get("PermitRootLogin") ?? null);
-
-  return {
-    user: map.get("SSH user") ?? null,
-    password: map.get("SSH pass") ?? null,
-    sshPort: Number.isInteger(parsedPort) ? parsedPort : null,
-    permitRootLogin,
-  };
-}
-
-function parsePermitRootLogin(value: string | null): boolean | null {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "yes") {
-    return true;
-  }
-  if (normalized === "no") {
-    return false;
-  }
-  return null;
-}
-
 async function readRunnerCredentialsFile(
   credentialPath: string,
   readFile: (filePath: string) => Promise<string>,
-): Promise<RunnerCredentials | null> {
+): Promise<OptionalParsedFile<RunnerCredentials>> {
   const content = await readOptionalTextFile(credentialPath, readFile);
   if (content === null) {
-    return null;
+    return { exists: false, value: null };
   }
 
-  return parseRunnerCredentials(content);
+  return {
+    exists: true,
+    value: parseRunnerCredentials(content),
+  };
+}
+
+async function readRunnerMetadataFile(
+  sshMetadataPath: string,
+  readFile: (filePath: string) => Promise<string>,
+  warnings: string[],
+): Promise<OptionalParsedFile<RunnerMetadata>> {
+  const content = await readOptionalTextFile(sshMetadataPath, readFile);
+  if (content === null) {
+    return { exists: false, value: null };
+  }
+
+  try {
+    return {
+      exists: true,
+      value: parseRunnerMetadata(content),
+    };
+  } catch (error) {
+    warnings.push(
+      `Could not parse devbox SSH metadata file: ${sshMetadataPath}. ` +
+      `Error: ${formatErrorMessage(error)}; ` +
+      "`sshUser`, `sshPort`, and `permitRootLogin` may be unavailable.",
+    );
+    return {
+      exists: true,
+      value: null,
+    };
+  }
 }
 
 async function readConfigHints(input: {
@@ -258,6 +277,58 @@ async function readConfigHints(input: {
   };
 }
 
+function appendMissingDataWarnings(input: {
+  warnings: string[];
+  credentialFile: OptionalParsedFile<RunnerCredentials>;
+  credentialPath: string;
+  password: string | null;
+  sshMetadataFile: OptionalParsedFile<RunnerMetadata>;
+  sshMetadataPath: string;
+  sshUser: string | null;
+  sshPort: number | null;
+  permitRootLogin: boolean | null;
+  remoteUser: string | null;
+}): void {
+  if (!input.credentialFile.exists) {
+    input.warnings.push(`Runner password file was not found: ${input.credentialPath}. \`password\` is unavailable.`);
+  } else if (input.password === null) {
+    input.warnings.push(
+      `Runner password file was present but did not contain a usable password: ${input.credentialPath}. \`password\` is unavailable.`,
+    );
+  }
+
+  if (!input.sshMetadataFile.exists) {
+    const unavailableFields = [
+      input.sshUser === null ? "sshUser" : null,
+      input.sshPort === null ? "sshPort" : null,
+      input.permitRootLogin === null ? "permitRootLogin" : null,
+    ].filter((field): field is string => field !== null);
+    if (unavailableFields.length > 0) {
+      input.warnings.push(
+        `Devbox SSH metadata file was not found: ${input.sshMetadataPath}. ` +
+        `${formatUnavailableFields(unavailableFields)} Start the workspace again with this devbox version to persist them.`,
+      );
+    }
+  } else if (input.sshMetadataFile.value !== null) {
+    const unavailableFields = [
+      input.sshMetadataFile.value.sshUser === null && input.sshUser === null ? "sshUser" : null,
+      input.sshMetadataFile.value.sshPort === null && input.sshPort === null ? "sshPort" : null,
+      input.sshMetadataFile.value.permitRootLogin === null && input.permitRootLogin === null ? "permitRootLogin" : null,
+    ].filter((field): field is string => field !== null);
+    if (unavailableFields.length > 0) {
+      input.warnings.push(
+        `Devbox SSH metadata file is missing ${formatFieldList(unavailableFields)}: ${input.sshMetadataPath}.`,
+      );
+    }
+  }
+
+  if (input.remoteUser === null) {
+    input.warnings.push(
+      "`remoteUser` is unavailable because the devcontainer config does not set `remoteUser` or `containerUser`.",
+    );
+  }
+}
+
 async function readOptionalTextFile(
   filePath: string,
   readFile: (filePath: string) => Promise<string>,
@@ -305,7 +376,7 @@ async function loadManagedContainers(input: {
   warnings: string[];
 }): Promise<DockerInspect[]> {
   if (!input.isDockerAvailable()) {
-    input.warnings.push("Docker was not found in PATH; reporting saved workspace state and credentials only.");
+    input.warnings.push("Docker was not found in PATH; reporting saved workspace state and persisted SSH files only.");
     return [];
   }
 
@@ -314,7 +385,9 @@ async function loadManagedContainers(input: {
     return await input.inspect(containerIds);
   } catch (error) {
     if (isCommandError(error)) {
-      input.warnings.push(`Docker status lookup failed; reporting saved workspace state and credentials only. ${formatCommandError(error)}`);
+      input.warnings.push(
+        `Docker status lookup failed; reporting saved workspace state and persisted SSH files only. ${formatCommandError(error)}`,
+      );
       return [];
     }
     throw error;
@@ -363,4 +436,25 @@ function firstPublishedHostPort(publishedPorts: Record<string, DevboxStatusPortB
   }
 
   return null;
+}
+
+function formatErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Unknown parse error.";
+}
+
+function formatUnavailableFields(fields: string[]): string {
+  return `${formatFieldList(fields)} ${fields.length === 1 ? "is" : "are"} unavailable.`;
+}
+
+function formatFieldList(fields: string[]): string {
+  if (fields.length === 1) {
+    return `\`${fields[0]}\``;
+  }
+  if (fields.length === 2) {
+    return `\`${fields[0]}\` and \`${fields[1]}\``;
+  }
+  return `${fields.slice(0, -1).map((field) => `\`${field}\``).join(", ")}, and \`${fields[fields.length - 1]}\``;
 }

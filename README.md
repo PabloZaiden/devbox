@@ -14,7 +14,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Shares a usable SSH agent socket with the container and copies a validated, non-empty `known_hosts` snapshot into the container.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
 - Runs the [`ssh-server-runner`](https://github.com/PabloZaiden/ssh-server-runner) one-liner inside the devcontainer.
-- Persists the runner credentials on the mounted workspace as a local `.sshcred` file, and keeps SSH host keys in `.devbox-ssh-host-keys/`, so they survive `down` / `rebuild`.
+- Persists the runner password on the mounted workspace as a local `.sshcred` file, stores devbox-owned SSH metadata in `.devbox-ssh.json`, and keeps SSH host keys in `.devbox-ssh-host-keys/`, so they survive `down` / `rebuild`.
 
 ## Installation
 
@@ -73,7 +73,7 @@ devbox shell
 # Print machine-readable JSON describing the managed devbox for this workspace
 devbox status
 
-# Stop and remove the managed container while preserving the workspace-mounted SSH credentials
+# Stop and remove the managed container while preserving the workspace-mounted SSH password, metadata, and host keys
 devbox down
 ```
 
@@ -107,11 +107,12 @@ Example:
   "remoteUser": "vscode",
   "hasStateFile": true,
   "hasCredentialFile": true,
+  "hasSshMetadataFile": true,
   "warnings": []
 }
 ```
 
-The full payload also includes useful diagnostic fields such as `workspaceHash`, `labels`, `publishedPorts`, `statePath`, `credentialPath`, `updatedAt`, and the stored/generated config paths.
+The full payload also includes useful diagnostic fields such as `workspaceHash`, `labels`, `publishedPorts`, `statePath`, `credentialPath`, `sshMetadataPath`, `updatedAt`, and the stored/generated config paths.
 
 ## Development
 
@@ -162,9 +163,9 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
-- `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` file when the container is stopped or Docker is unavailable.
+- `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` password file and `.devbox-ssh.json` metadata when the container is stopped or Docker is unavailable.
 - `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
-- `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
+- `down` removes managed containers but does not delete the workspace `.sshcred`, `.devbox-ssh.json`, or `.devbox-ssh-host-keys/`, so the SSH password, SSH metadata, and SSH host identity survive rebuilds.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.

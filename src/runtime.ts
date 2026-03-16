@@ -20,6 +20,7 @@ import {
   RUNNER_URL,
   WORKSPACE_LABEL_KEY,
 } from "./constants";
+import { parseRunnerCredentials, type RunnerCredentials } from "./runnerState";
 
 interface ExecResult {
   stdout: string;
@@ -591,10 +592,11 @@ export async function startRunner(
   containerId: string,
   port: number,
   remoteWorkspaceFolder: string,
-): Promise<void> {
+): Promise<RunnerCredentials> {
   const script = `curl -fsSL ${quoteShell(getRunnerUrl())} | env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash`;
   const result = await devcontainerExec(containerId, script, { quiet: true });
   const summaryLines = getRunnerSummaryLines(result.stdout);
+  const parsedSummary = parseRunnerCredentials(summaryLines.join("\n"));
 
   if (summaryLines.length > 0) {
     console.log("\nSSH server:");
@@ -607,6 +609,13 @@ export async function startRunner(
       console.log(output);
     }
   }
+
+  return {
+    user: parsedSummary.user,
+    password: parsedSummary.password,
+    sshPort: parsedSummary.sshPort ?? port,
+    permitRootLogin: parsedSummary.permitRootLogin,
+  };
 }
 
 export async function persistRunnerHostKeys(
