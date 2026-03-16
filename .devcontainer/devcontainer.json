@@ -6,12 +6,10 @@
 	"image": "mcr.microsoft.com/devcontainers/base:noble",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
+		"ghcr.io/devcontainers/features/node:1": {},
 		"ghcr.io/pablozaiden/devcontainers-features/bun": {}
 	},
-	"remoteEnv": {
-		"PATH": "${containerEnv:HOME}/.bun/bin:${containerEnv:PATH}"
-	},
-	"postCreateCommand": "bun install --global @devcontainers/cli@0.84.0 && devcontainer --version"
+	"postCreateCommand": "export PATH=\"/usr/local/share/nvm/current/bin:$PATH\"; sudo env PATH=\"$PATH\" /usr/local/share/nvm/current/bin/npm install -g @devcontainers/cli@0.84.0 && devcontainer --version"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
