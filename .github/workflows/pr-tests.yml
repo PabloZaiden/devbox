@@ -26,7 +26,7 @@ jobs:
 
       - name: Install Dev Containers CLI
         run: |
-          bun install --global @devcontainers/cli
+          bun install --global @devcontainers/cli@0.84.0
           devcontainer --version
 
       - name: Install dependencies

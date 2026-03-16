@@ -39,7 +39,7 @@ Run `devbox` with no arguments to see the CLI help.
 - macOS or Linux
 - [Node.js](https://nodejs.org/) or [Bun](https://bun.sh/) to run the installed CLI
 - Docker
-- Dev Container CLI available as `devcontainer`
+- Dev Container CLI available as `devcontainer` in whatever environment runs `devbox`
 - For SSH agent sharing: either a valid host `SSH_AUTH_SOCK`, or Docker Desktop host services
 - A devcontainer using `image` or `Dockerfile`
 
@@ -115,6 +115,10 @@ The full payload also includes useful diagnostic fields such as `workspaceHash`,
 
 ## Development
 
+The root project devcontainer installs a pinned `@devcontainers/cli` with Bun during container setup and exposes Bun's bin directory on `PATH`, so if you develop `devbox` inside this repository's devcontainer you do not need to install the Dev Containers CLI separately inside the container.
+
+If you run the project directly on the host instead of inside the repository devcontainer, you still need Docker plus a host `devcontainer` binary available on `PATH`.
+
 ```bash
 bun install
 bun test
@@ -124,7 +128,7 @@ bun run build
 
 Pull requests run the same test-and-build checks automatically through GitHub Actions.
 
-`bun test` now includes the real example-workspace devcontainer integration tests by default, so it requires Docker and the Dev Container CLI to be available locally.
+`bun test` now includes the real example-workspace devcontainer integration tests by default, so it requires Docker and the Dev Container CLI to be available in the environment where the tests run.
 
 Use `bun test tests/examples.live.test.ts` to run only the live example-devcontainer suite.
 
