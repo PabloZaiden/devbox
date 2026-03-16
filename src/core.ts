@@ -17,7 +17,7 @@ import {
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 
-export type CommandName = "up" | "down" | "rebuild" | "shell" | "help";
+export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "help";
 
 export interface ParsedArgs {
   command: CommandName;
@@ -89,7 +89,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <path> Use .devcontainer/<path>/devcontainer.json.\n  -h, --help                    Show this help.\n\nNotes:\n  - Running ${CLI_NAME} with no arguments shows this help.\n  - The same port is published on host and container.\n  - \`${CLI_NAME} up\` uses the explicit port when provided, otherwise reuses the last stored port for the workspace, otherwise auto-assigns the first free port starting at ${DEFAULT_UP_AUTO_PORT_START}.\n  - \`${CLI_NAME} rebuild\` reuses the last stored port for the workspace when no port is provided.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
+  return `${CLI_NAME} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  status   Print JSON describing the managed devbox for this workspace.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <path> Use .devcontainer/<path>/devcontainer.json.\n  -h, --help                    Show this help.\n\nNotes:\n  - Running ${CLI_NAME} with no arguments shows this help.\n  - The same port is published on host and container.\n  - \`${CLI_NAME} up\` uses the explicit port when provided, otherwise reuses the last stored port for the workspace, otherwise auto-assigns the first free port starting at ${DEFAULT_UP_AUTO_PORT_START}.\n  - \`${CLI_NAME} rebuild\` reuses the last stored port for the workspace when no port is provided.\n  - \`${CLI_NAME} status\` prints machine-readable JSON for the current workspace.\n  - ${CLI_NAME} shell opens an interactive shell in the running managed container for this workspace.\n  - Only image/Dockerfile-based devcontainers are supported in v1.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -102,7 +102,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let command: CommandName;
   const first = args[0];
 
-  if (first === "up" || first === "down" || first === "rebuild" || first === "shell") {
+  if (first === "up" || first === "down" || first === "rebuild" || first === "shell" || first === "status") {
     command = first;
     args.shift();
   } else if (first === "help") {
@@ -178,6 +178,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (command === "shell") {
       throw new UserError("The shell command does not accept a port.");
     }
+    if (command === "status") {
+      throw new UserError("The status command does not accept a port.");
+    }
     port = parsePort(positionals[0]);
   }
 
@@ -189,8 +192,20 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The shell command does not accept a port.");
   }
 
+  if (command === "status" && port !== undefined) {
+    throw new UserError("The status command does not accept a port.");
+  }
+
   if (command === "shell" && devcontainerSubpath !== undefined) {
     throw new UserError("The shell command does not accept --devcontainer-subpath.");
+  }
+
+  if (command === "status" && devcontainerSubpath !== undefined) {
+    throw new UserError("The status command does not accept --devcontainer-subpath.");
+  }
+
+  if (command === "status" && allowMissingSsh) {
+    throw new UserError("The status command does not accept --allow-missing-ssh.");
   }
 
   if (devcontainerSubpath) {

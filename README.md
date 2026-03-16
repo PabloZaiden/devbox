@@ -70,6 +70,9 @@ devbox rebuild <port>
 # Open an interactive shell in the running managed devcontainer for this workspace
 devbox shell
 
+# Print machine-readable JSON describing the managed devbox for this workspace
+devbox status
+
 # Stop and remove the managed container while preserving the workspace-mounted SSH credentials
 devbox down
 ```
@@ -83,6 +86,32 @@ When you run `devbox up`, the port precedence is:
 When you run `devbox rebuild`, omitting the port reuses the last stored port for the current workspace.
 
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
+
+`devbox status` always prints JSON so it can be used directly from scripts and automation.
+
+Example:
+
+```json
+{
+  "running": true,
+  "port": 5001,
+  "password": "password",
+  "workdir": "/workspaces/my-project",
+  "workspacePath": "/host/path/to/my-project",
+  "containerId": "abcdef123456",
+  "containerName": "devbox-my-project-5001",
+  "containerState": "running",
+  "containerCount": 1,
+  "sshUser": "root",
+  "sshPort": 5001,
+  "remoteUser": "vscode",
+  "hasStateFile": true,
+  "hasCredentialFile": true,
+  "warnings": []
+}
+```
+
+The full payload also includes useful diagnostic fields such as `workspaceHash`, `labels`, `publishedPorts`, `statePath`, `credentialPath`, `updatedAt`, and the stored/generated config paths.
 
 ## Development
 
@@ -129,6 +158,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - The generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
+- `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` file when the container is stopped.
 - `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
 - `down` removes managed containers but does not delete the workspace `.sshcred` or `.devbox-ssh-host-keys/`, so the SSH password and SSH host identity survive rebuilds.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.

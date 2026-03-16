@@ -54,6 +54,10 @@ describe("parseArgs", () => {
     expect(parseArgs(["shell"])).toEqual({ command: "shell", allowMissingSsh: false });
   });
 
+  test("supports the status subcommand", () => {
+    expect(parseArgs(["status"])).toEqual({ command: "status", allowMissingSsh: false });
+  });
+
   test("supports selecting a devcontainer subpath", () => {
     expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
       command: "up",
@@ -89,6 +93,16 @@ describe("parseArgs", () => {
       "The shell command does not accept --devcontainer-subpath.",
     );
   });
+
+  test("status rejects ports and unrelated options", () => {
+    expect(() => parseArgs(["status", "5001"])).toThrow("The status command does not accept a port.");
+    expect(() => parseArgs(["status", "--devcontainer-subpath", "services/api"])).toThrow(
+      "The status command does not accept --devcontainer-subpath.",
+    );
+    expect(() => parseArgs(["status", "--allow-missing-ssh"])).toThrow(
+      "The status command does not accept --allow-missing-ssh.",
+    );
+  });
 });
 
 describe("helpText", () => {
@@ -96,6 +110,7 @@ describe("helpText", () => {
     expect(helpText()).toContain("`devbox up` uses the explicit port when provided");
     expect(helpText()).toContain("auto-assigns the first free port starting at 5001");
     expect(helpText()).toContain("`devbox rebuild` reuses the last stored port for the workspace");
+    expect(helpText()).toContain("`devbox status` prints machine-readable JSON");
   });
 });
 
