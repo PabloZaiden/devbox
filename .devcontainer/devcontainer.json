@@ -6,10 +6,12 @@
 	"image": "mcr.microsoft.com/devcontainers/base:noble",
 	"features": {
 		"ghcr.io/devcontainers/features/docker-in-docker:2": {},
-		"ghcr.io/devcontainers/features/node:1": {},
 		"ghcr.io/pablozaiden/devcontainers-features/bun": {}
 	},
-	"postCreateCommand": "sudo --preserve-env=PATH npm install -g @devcontainers/cli@0.84.0 && devcontainer --version"
+	"remoteEnv": {
+		"PATH": "/home/vscode/.bun/bin:${containerEnv:PATH}"
+	},
+	"postCreateCommand": "bash -lc 'command -v bun && bun install -g @devcontainers/cli@0.84.0 && command -v devcontainer && devcontainer --version'"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

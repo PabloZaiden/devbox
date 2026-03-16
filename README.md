@@ -115,7 +115,7 @@ The full payload also includes useful diagnostic fields such as `workspaceHash`,
 
 ## Development
 
-The root project devcontainer installs a pinned `@devcontainers/cli` during container setup and exposes it on `PATH`, so if you develop `devbox` inside this repository's devcontainer you do not need to install the Dev Containers CLI separately inside the container.
+The root project devcontainer installs a pinned `@devcontainers/cli` with Bun during container setup and exposes Bun's bin directory on `PATH`, so if you develop `devbox` inside this repository's devcontainer you do not need to install the Dev Containers CLI separately inside the container.
 
 If you run the project directly on the host instead of inside the repository devcontainer, you still need Docker plus a host `devcontainer` binary available on `PATH`.
 
