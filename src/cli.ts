@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { realpath } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildManagedConfig,
@@ -54,7 +54,13 @@ import {
   startRunner,
   stopManagedSshd,
 } from "./runtime";
-import { DEFAULT_UP_AUTO_PORT_START, DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, RUNNER_HOST_KEYS_DIRNAME } from "./constants";
+import {
+  DEFAULT_UP_AUTO_PORT_START,
+  DEVBOX_SSH_METADATA_FILENAME,
+  DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+  RUNNER_HOST_KEYS_DIRNAME,
+} from "./constants";
+import { createRunnerMetadata, serializeRunnerMetadata } from "./runnerState";
 import { getDevboxStatus } from "./status";
 
 async function main(): Promise<void> {
@@ -189,6 +195,8 @@ async function handleUpLike(
 
   console.log("Configuring SSH access inside the devcontainer...");
   await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME));
+  const runnerMetadataPath = path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME);
+  await ensurePathIgnored(workspacePath, runnerMetadataPath);
   if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
     console.log("Making the forwarded SSH agent socket accessible to the container user...");
     await ensureSshAuthSockAccessible(upResult.containerId, environment.sshAuthSock);
@@ -206,12 +214,23 @@ async function handleUpLike(
   }
   await stopManagedSshd(upResult.containerId);
   await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
-  await runStepWithHeartbeat({
+  const runnerCredentials = await runStepWithHeartbeat({
     startMessage: "Installing and starting the SSH server inside the container (first run can take a bit)...",
     heartbeatMessage: "Still installing and starting the SSH server",
     successMessage: "SSH server is ready",
     action: () => startRunner(upResult.containerId, port, remoteWorkspaceFolder),
   });
+  await writeFile(
+    runnerMetadataPath,
+    serializeRunnerMetadata(
+      createRunnerMetadata({
+        sshUser: runnerCredentials.user,
+        sshPort: runnerCredentials.sshPort ?? port,
+        permitRootLogin: runnerCredentials.permitRootLogin,
+      }),
+    ),
+    "utf8",
+  );
   console.log("Saving SSH server state for future runs...");
   await persistRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
 
@@ -296,7 +315,7 @@ async function handleDown(
   }
 
   console.log(
-    `Removed ${containerIds.length} managed container(s). Workspace-mounted SSH credentials and host keys were preserved.`,
+    `Removed ${containerIds.length} managed container(s). Workspace-mounted SSH password, metadata, and host keys were preserved.`,
   );
 }
 

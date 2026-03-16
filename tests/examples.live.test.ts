@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   CLI_NAME,
+  DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   MANAGED_LABEL_KEY,
   RUNNER_CRED_FILENAME,
@@ -61,6 +62,7 @@ interface LiveFixture {
   remoteWorkspaceFolder: string;
   runnerArtifacts: RunnerArtifacts;
   runnerCredPath: string;
+  runnerMetadataPath: string;
   runnerHostKeyMarker: string;
   sampleFilePath: string;
   sshAuthSockPath: string | null;
@@ -124,13 +126,18 @@ describe("example workspaces (real devcontainers)", () => {
       expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([String(fixture.port)]);
 
       const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
-      expect(runnerCredContent).toContain(`port=${fixture.port}`);
+      expect(runnerCredContent.trim()).toBe("password");
+      const runnerMetadata = await readJson(fixture.runnerMetadataPath);
+      expect(runnerMetadata.sshUser).toBe("root");
+      expect(runnerMetadata.sshPort).toBe(fixture.port);
+      expect(runnerMetadata.permitRootLogin).toBe(true);
 
       const down = runCli(fixture, ["down"]);
       expect(down.exitCode).toBe(0);
       expect(down.stdout).toContain("Removed 1 managed container(s).");
       expect(await listManagedContainerIds(fixture)).toEqual([]);
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
+      expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
       expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
       expect(existsSync(fixture.statePath)).toBe(false);
     },
@@ -219,7 +226,11 @@ describe("example workspaces (real devcontainers)", () => {
       expect(hostKeyInContainer.stdout.trim()).toBe(fixture.runnerHostKeyMarker);
 
       const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
-      expect(runnerCredContent).toContain(`port=${fixture.port}`);
+      expect(runnerCredContent.trim()).toBe("password");
+      const runnerMetadata = await readJson(fixture.runnerMetadataPath);
+      expect(runnerMetadata.sshUser).toBe("root");
+      expect(runnerMetadata.sshPort).toBe(fixture.port);
+      expect(runnerMetadata.permitRootLogin).toBe(true);
 
       const rebuild = runCli(fixture, ["rebuild"]);
       expect(rebuild.exitCode).toBe(0);
@@ -243,6 +254,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(down.stdout).toContain("Removed 1 managed container(s).");
       expect(await listManagedContainerIds(fixture)).toEqual([]);
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
+      expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
       expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
       expect(existsSync(fixture.statePath)).toBe(false);
     },
@@ -320,6 +332,7 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
       sshAuthSock: path.join(workspacePath, ".devbox-test-ssh-auth-sock"),
     },
     runnerCredPath: path.join(workspacePath, RUNNER_CRED_FILENAME),
+    runnerMetadataPath: path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME),
     runnerHostKeyMarker,
     sampleFilePath: path.join(workspacePath, "sample-file.txt"),
     sshAuthSockPath,
@@ -560,7 +573,7 @@ else
   printf '%s\\n' 'missing' > "$workspace_root/.devbox-test-ssh-auth-sock"
 fi
 
-printf 'user=root\\npass=password\\nport=%s\\n' "$SSH_PORT" > "$CRED_FILE"
+printf 'password\\n' > "$CRED_FILE"
 
 root_script="mkdir -p /etc/ssh && if [ ! -f /etc/ssh/ssh_host_devbox_test_key ]; then printf '%s\\\\n' '${hostKeyMarker}' > /etc/ssh/ssh_host_devbox_test_key && chmod 600 /etc/ssh/ssh_host_devbox_test_key; fi && if [ ! -f /etc/ssh/ssh_host_devbox_test_key.pub ]; then printf '%s\\\\n' '${hostKeyMarker}.pub' > /etc/ssh/ssh_host_devbox_test_key.pub && chmod 644 /etc/ssh/ssh_host_devbox_test_key.pub; fi"
 if [ "$(id -u)" -eq 0 ]; then
