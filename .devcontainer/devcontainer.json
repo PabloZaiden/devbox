@@ -9,9 +9,9 @@
 		"ghcr.io/pablozaiden/devcontainers-features/bun": {}
 	},
 	"remoteEnv": {
-		"PATH": "/home/vscode/.bun/bin:${containerEnv:PATH}"
+		"PATH": "/home/vscode/.devcontainers/bin:/home/vscode/.bun/bin:${containerEnv:PATH}"
 	},
-	"postCreateCommand": "bash -lc 'command -v bun && bun install -g @devcontainers/cli@0.84.0 && command -v devcontainer && devcontainer --version'"
+	"postCreateCommand": "curl -fsSL https://raw.githubusercontent.com/devcontainers/cli/main/scripts/install.sh | sh"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

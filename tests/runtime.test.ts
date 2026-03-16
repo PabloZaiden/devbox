@@ -504,7 +504,7 @@ describe("formatDevcontainerProgressLine", () => {
 
   test("drops noisy low-level devcontainer log lines", () => {
     expect(
-      formatDevcontainerProgressLine('{"type":"text","level":3,"text":"@devcontainers/cli 0.84.0"}'),
+      formatDevcontainerProgressLine('{"type":"text","level":3,"text":"@devcontainers/cli 0.75.0"}'),
     ).toBeNull();
     expect(
       formatDevcontainerProgressLine('{"type":"text","level":2,"text":"Run: docker buildx version"}'),
