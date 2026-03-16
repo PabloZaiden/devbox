@@ -205,7 +205,8 @@ async function readRunnerMetadataFile(
     };
   } catch (error) {
     warnings.push(
-      `Could not parse devbox SSH metadata file: ${sshMetadataPath}. ${formatErrorMessage(error)} ` +
+      `Could not parse devbox SSH metadata file: ${sshMetadataPath}. ` +
+      `Error: ${formatErrorMessage(error)}; ` +
       "`sshUser`, `sshPort`, and `permitRootLogin` may be unavailable.",
     );
     return {
