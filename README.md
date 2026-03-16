@@ -39,7 +39,7 @@ Run `devbox` with no arguments to see the CLI help.
 - macOS or Linux
 - [Node.js](https://nodejs.org/) or [Bun](https://bun.sh/) to run the installed CLI
 - Docker
-- Dev Container CLI available as `devcontainer` when running locally outside the repository devcontainer
+- Dev Container CLI available as `devcontainer` in whatever environment runs `devbox`
 - For SSH agent sharing: either a valid host `SSH_AUTH_SOCK`, or Docker Desktop host services
 - A devcontainer using `image` or `Dockerfile`
 

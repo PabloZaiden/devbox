@@ -9,7 +9,7 @@
 		"ghcr.io/devcontainers/features/node:1": {},
 		"ghcr.io/pablozaiden/devcontainers-features/bun": {}
 	},
-	"postCreateCommand": "export PATH=\"/usr/local/share/nvm/current/bin:$PATH\"; sudo env PATH=\"$PATH\" /usr/local/share/nvm/current/bin/npm install -g @devcontainers/cli@0.84.0 && devcontainer --version"
+	"postCreateCommand": "sudo --preserve-env=PATH npm install -g @devcontainers/cli@0.84.0 && devcontainer --version"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
