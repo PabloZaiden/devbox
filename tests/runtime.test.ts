@@ -320,22 +320,22 @@ describe("buildConfigureGitIdentityScript", () => {
 });
 
 describe("ensurePathIgnored", () => {
+  const run = (cmd: string[], cwd?: string) => {
+    const result = Bun.spawnSync(cmd, {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (result.exitCode !== 0) {
+      throw new Error(Buffer.from(result.stderr).toString("utf8"));
+    }
+  };
+
   test("writes to the common exclude file for git worktrees", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-runtime-test-"));
     tempPaths.push(tempDir);
     const repoDir = path.join(tempDir, "repo");
     const worktreeDir = path.join(tempDir, "worktree");
-
-    const run = (cmd: string[], cwd?: string) => {
-      const result = Bun.spawnSync(cmd, {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      if (result.exitCode !== 0) {
-        throw new Error(Buffer.from(result.stderr).toString("utf8"));
-      }
-    };
 
     run(["git", "init", repoDir]);
     run(["git", "-C", repoDir, "config", "user.email", "devbox@example.com"]);
@@ -366,17 +366,6 @@ describe("ensurePathIgnored", () => {
     tempPaths.push(tempDir);
     const repoDir = path.join(tempDir, "repo");
 
-    const run = (cmd: string[], cwd?: string) => {
-      const result = Bun.spawnSync(cmd, {
-        cwd,
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      if (result.exitCode !== 0) {
-        throw new Error(Buffer.from(result.stderr).toString("utf8"));
-      }
-    };
-
     run(["git", "init", repoDir]);
     run(["git", "-C", repoDir, "config", "user.email", "devbox@example.com"]);
     run(["git", "-C", repoDir, "config", "user.name", "Devbox Test"]);
@@ -397,11 +386,12 @@ describe("ensurePathIgnored", () => {
     const excludeContent = await readFile(excludePath, "utf8");
     expect(excludeContent).toContain("/.sshcred");
 
-    // Verify .sshcred is not tracked by git (appears untracked but not staged)
+    // Verify .sshcred is ignored by git (does not appear in git status output)
     const statusResult = Bun.spawnSync(["git", "-C", repoDir, "status", "--porcelain"], {
       stdout: "pipe",
       stderr: "pipe",
     });
+    expect(statusResult.exitCode).toBe(0);
     const statusOutput = Buffer.from(statusResult.stdout).toString("utf8");
     expect(statusOutput).not.toContain(".sshcred");
   });
