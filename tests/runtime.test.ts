@@ -360,6 +360,51 @@ describe("ensurePathIgnored", () => {
     const excludeContent = await readFile(excludePath, "utf8");
     expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
   });
+
+  test("locally ignores .sshcred when workspace is inside a git repo", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-runtime-test-"));
+    tempPaths.push(tempDir);
+    const repoDir = path.join(tempDir, "repo");
+
+    const run = (cmd: string[], cwd?: string) => {
+      const result = Bun.spawnSync(cmd, {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(Buffer.from(result.stderr).toString("utf8"));
+      }
+    };
+
+    run(["git", "init", repoDir]);
+    run(["git", "-C", repoDir, "config", "user.email", "devbox@example.com"]);
+    run(["git", "-C", repoDir, "config", "user.name", "Devbox Test"]);
+    await writeFile(path.join(repoDir, "README.md"), "root\n", "utf8");
+    run(["git", "-C", repoDir, "add", "README.md"]);
+    run(["git", "-C", repoDir, "commit", "-m", "init"]);
+
+    const credFilePath = path.join(repoDir, ".sshcred");
+    await writeFile(credFilePath, "user=devbox\npassword=secret\n", "utf8");
+    await ensurePathIgnored(repoDir, credFilePath);
+
+    const excludePathResult = Bun.spawnSync(
+      ["git", "-C", repoDir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    expect(excludePathResult.exitCode).toBe(0);
+    const excludePath = Buffer.from(excludePathResult.stdout).toString("utf8").trim();
+    const excludeContent = await readFile(excludePath, "utf8");
+    expect(excludeContent).toContain("/.sshcred");
+
+    // Verify .sshcred is not tracked by git (appears untracked but not staged)
+    const statusResult = Bun.spawnSync(["git", "-C", repoDir, "status", "--porcelain"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const statusOutput = Buffer.from(statusResult.stdout).toString("utf8");
+    expect(statusOutput).not.toContain(".sshcred");
+  });
 });
 
 describe("resolveGhCliToken", () => {
