@@ -58,6 +58,7 @@ import {
   DEFAULT_UP_AUTO_PORT_START,
   DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+  RUNNER_CRED_FILENAME,
   RUNNER_HOST_KEYS_DIRNAME,
 } from "./constants";
 import { createRunnerMetadata, serializeRunnerMetadata } from "./runnerState";
@@ -197,6 +198,7 @@ async function handleUpLike(
   await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME));
   const runnerMetadataPath = path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME);
   await ensurePathIgnored(workspacePath, runnerMetadataPath);
+  await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_CRED_FILENAME));
   if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
     console.log("Making the forwarded SSH agent socket accessible to the container user...");
     await ensureSshAuthSockAccessible(upResult.containerId, environment.sshAuthSock);
