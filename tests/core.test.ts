@@ -107,11 +107,8 @@ describe("parseArgs", () => {
 });
 
 describe("helpText", () => {
-  test("documents stored-port reuse and fallback auto-assignment for up", () => {
-    expect(helpText()).toContain("`devbox up` uses the explicit port when provided");
-    expect(helpText()).toContain("auto-assigns the first free port starting at 5001");
-    expect(helpText()).toContain("`devbox rebuild` reuses the last stored port for the workspace");
-    expect(helpText()).toContain("`devbox status` prints machine-readable JSON");
+  test("does not include a Notes section", () => {
+    expect(helpText()).not.toContain("Notes:");
   });
 
   test("includes the package version", () => {
