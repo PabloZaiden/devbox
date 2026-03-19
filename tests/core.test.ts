@@ -107,15 +107,29 @@ describe("parseArgs", () => {
 });
 
 describe("helpText", () => {
-  test("documents stored-port reuse and fallback auto-assignment for up", () => {
-    expect(helpText()).toContain("`devbox up` uses the explicit port when provided");
-    expect(helpText()).toContain("auto-assigns the first free port starting at 5001");
-    expect(helpText()).toContain("`devbox rebuild` reuses the last stored port for the workspace");
-    expect(helpText()).toContain("`devbox status` prints machine-readable JSON");
+  test("does not include a Notes section", () => {
+    expect(helpText()).not.toContain("Notes:");
   });
 
   test("includes the package version", () => {
     expect(helpText()).toContain(pkg.version);
+  });
+
+  test("includes core sections", () => {
+    const text = helpText();
+    expect(text).toContain("Usage:");
+    expect(text).toContain("Commands:");
+    expect(text).toContain("Options:");
+  });
+
+  test("lists all commands", () => {
+    const text = helpText();
+    expect(text).toContain("up");
+    expect(text).toContain("rebuild");
+    expect(text).toContain("shell");
+    expect(text).toContain("status");
+    expect(text).toContain("down");
+    expect(text).toContain("help");
   });
 });
 
