@@ -37,8 +37,6 @@ jobs:
 
       - name: Run tests
         run: bun test
-        env:
-          DEVBOX_SKIP_LIVE_EXAMPLE_TESTS: "1"
 
       - name: Build package
         run: bun run build
