@@ -114,6 +114,23 @@ describe("helpText", () => {
   test("includes the package version", () => {
     expect(helpText()).toContain(pkg.version);
   });
+
+  test("includes core sections", () => {
+    const text = helpText();
+    expect(text).toContain("Usage:");
+    expect(text).toContain("Commands:");
+    expect(text).toContain("Options:");
+  });
+
+  test("lists all commands", () => {
+    const text = helpText();
+    expect(text).toContain("up");
+    expect(text).toContain("rebuild");
+    expect(text).toContain("shell");
+    expect(text).toContain("status");
+    expect(text).toContain("down");
+    expect(text).toContain("help");
+  });
 });
 
 describe("resolvePort", () => {
