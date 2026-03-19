@@ -1,4 +1,3 @@
-import pkg from "../package.json";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { access, chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -6,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
 import type { ParseError } from "jsonc-parser";
+import pkg from "../package.json";
 import {
   CLI_NAME,
   DEFAULT_UP_AUTO_PORT_START,
