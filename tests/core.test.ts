@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
+import pkg from "../package.json";
 import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import {
   buildManagedConfig,
@@ -111,6 +112,10 @@ describe("helpText", () => {
     expect(helpText()).toContain("auto-assigns the first free port starting at 5001");
     expect(helpText()).toContain("`devbox rebuild` reuses the last stored port for the workspace");
     expect(helpText()).toContain("`devbox status` prints machine-readable JSON");
+  });
+
+  test("includes the package version", () => {
+    expect(helpText()).toContain(pkg.version);
   });
 });
 
