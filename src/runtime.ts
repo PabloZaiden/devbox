@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, appendFile, mkdir, readFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -72,10 +72,25 @@ export function isExecutableAvailable(command: string): boolean {
   return findExecutableOnPath(command) !== null;
 }
 
-export function buildStopManagedSshdScript(): string {
+export function buildStopManagedSshdScript(port: number): string {
+  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
   return [
-    "pids=$(ps -eo pid=,comm= | while read -r pid comm; do",
-    '  if [ "$comm" = "sshd" ]; then printf \'%s\\n\' "$pid"; fi',
+    `target_port=${quoteShell(`:${hexPort}`)}`,
+    "target_inodes=$(awk -v target_port=\"$target_port\" 'NR > 1 && $2 ~ (target_port \"$\") && $4 == \"0A\" { print $10 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -u)",
+    'if [ -z "$target_inodes" ]; then exit 0; fi',
+    "pids=$(for proc in /proc/[0-9]*; do",
+    '  pid="${proc#/proc/}"',
+    '  comm=$(cat "$proc/comm" 2>/dev/null || true)',
+    '  if [ "$comm" != "sshd" ]; then continue; fi',
+    '  for fd in "$proc"/fd/*; do',
+    '    link=$(readlink "$fd" 2>/dev/null || true)',
+    '    for inode in $target_inodes; do',
+    '      if [ "$link" = "socket:[$inode]" ]; then',
+    '        printf \'%s\\n\' "$pid"',
+    "        continue 3",
+    "      fi",
+    "    done",
+    "  done",
     "done)",
     'if [ -n "$pids" ]; then kill $pids; fi',
   ].join("\n");
@@ -376,7 +391,9 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
     return;
   }
 
-  const relative = path.relative(gitTopLevel, absolutePath);
+  const canonicalGitTopLevel = await resolveComparablePath(gitTopLevel);
+  const canonicalTargetPath = await resolveComparablePath(absolutePath);
+  const relative = path.relative(canonicalGitTopLevel, canonicalTargetPath);
   if (!relative || relative.startsWith("..")) {
     return;
   }
@@ -402,6 +419,23 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
 
   const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
   await appendFile(excludePath, `${prefix}${normalized}\n`, "utf8");
+}
+
+async function resolveComparablePath(inputPath: string): Promise<string> {
+  try {
+    return await realpath(inputPath);
+  } catch {
+    const parentPath = path.dirname(inputPath);
+    if (parentPath === inputPath) {
+      return inputPath;
+    }
+
+    try {
+      return path.join(await realpath(parentPath), path.basename(inputPath));
+    } catch {
+      return inputPath;
+    }
+  }
 }
 
 export async function listManagedContainers(labels: Record<string, string>): Promise<string[]> {
@@ -553,8 +587,11 @@ export async function configureGitIdentity(
   await devcontainerExec(containerId, script, { quiet: true });
 }
 
-export async function stopManagedSshd(containerId: string): Promise<void> {
-  await devcontainerExec(containerId, buildStopManagedSshdScript(), { quiet: true });
+export async function stopManagedSshd(containerId: string, port: number): Promise<void> {
+  await dockerExec(containerId, buildStopManagedSshdScript(port), {
+    quiet: true,
+    user: "root",
+  });
 }
 
 export async function ensureSshAuthSockAccessible(

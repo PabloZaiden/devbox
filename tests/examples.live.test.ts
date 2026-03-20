@@ -88,7 +88,7 @@ afterEach(async () => {
 
 describe("example workspaces (real devcontainers)", () => {
   liveTest(
-    "smoke workspace exercises the real minimal devcontainer path",
+    "smoke workspace exercises the real docker-in-docker devcontainer path",
     async () => {
       const fixture = await setupLiveFixture("smoke-workspace");
       const up = runCli(fixture, ["up", String(fixture.port), "--allow-missing-ssh"]);
@@ -116,6 +116,13 @@ describe("example workspaces (real devcontainers)", () => {
         `cat ${quoteShell(path.posix.join(fixture.remoteWorkspaceFolder, "sample-file.txt"))}`,
       );
       expect(sample.stdout).toBe(sampleFileContent);
+
+      const featureChecks = execInContainer(
+        fixture,
+        containerId,
+        "docker --version >/dev/null",
+      );
+      expect(featureChecks.exitCode).toBe(0);
 
       expect(await readTrimmedFile(fixture.runnerArtifacts.sshAuthSock)).toBe("missing");
       expect(existsSync(fixture.runnerArtifacts.ghToken)).toBe(false);
