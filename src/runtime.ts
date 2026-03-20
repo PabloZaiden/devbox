@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, appendFile, mkdir, readFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -376,7 +376,9 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
     return;
   }
 
-  const relative = path.relative(gitTopLevel, absolutePath);
+  const canonicalGitTopLevel = await resolveComparablePath(gitTopLevel);
+  const canonicalTargetPath = await resolveComparablePath(absolutePath);
+  const relative = path.relative(canonicalGitTopLevel, canonicalTargetPath);
   if (!relative || relative.startsWith("..")) {
     return;
   }
@@ -402,6 +404,23 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
 
   const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
   await appendFile(excludePath, `${prefix}${normalized}\n`, "utf8");
+}
+
+async function resolveComparablePath(inputPath: string): Promise<string> {
+  try {
+    return await realpath(inputPath);
+  } catch {
+    const parentPath = path.dirname(inputPath);
+    if (parentPath === inputPath) {
+      return inputPath;
+    }
+
+    try {
+      return path.join(await realpath(parentPath), path.basename(inputPath));
+    } catch {
+      return inputPath;
+    }
+  }
 }
 
 export async function listManagedContainers(labels: Record<string, string>): Promise<string[]> {
@@ -554,7 +573,10 @@ export async function configureGitIdentity(
 }
 
 export async function stopManagedSshd(containerId: string): Promise<void> {
-  await devcontainerExec(containerId, buildStopManagedSshdScript(), { quiet: true });
+  await dockerExec(containerId, buildStopManagedSshdScript(), {
+    quiet: true,
+    user: "root",
+  });
 }
 
 export async function ensureSshAuthSockAccessible(

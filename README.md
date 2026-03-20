@@ -142,7 +142,7 @@ For local development from this repository:
 - use `bun run src/cli.ts` while iterating on source changes
 - use `./dist/devbox.js` after `bun run build` to exercise the packaged artifact
 
-For a quick smoke test, this repository includes `examples/smoke-workspace/.devcontainer/devcontainer.json`:
+For a quick smoke test, this repository includes `examples/smoke-workspace/.devcontainer/devcontainer.json`, which also exercises the Docker-in-Docker path:
 
 ```bash
 cd examples/smoke-workspace

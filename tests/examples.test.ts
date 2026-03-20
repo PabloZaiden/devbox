@@ -44,6 +44,7 @@ interface LoggedCommand {
   containerId?: string;
   script?: string;
   tool: string;
+  user?: string;
 }
 
 const FAKE_HOST_TOOL = String.raw`#!/usr/bin/env bun
@@ -386,6 +387,9 @@ describe("example workspaces (simulated host tools)", () => {
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+    expect(generatedConfig.features).toEqual({
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    });
     expect(generatedConfig.runArgs).toEqual(["--name", "devbox-smoke-workspace-5001", "-p", "5001:5001"]);
     expect(generatedConfig.mounts).toEqual([]);
     expect(generatedConfig.containerEnv).toEqual({});
@@ -394,6 +398,18 @@ describe("example workspaces (simulated host tools)", () => {
     expect(state.port).toBe(5001);
     expect(state.sourceConfigPath).toBe(fixture.sourceConfigPath);
     expect(state.generatedConfigPath).toBe(fixture.generatedConfigPath);
+
+    const commandsAfterUp = await readCommandLog(fixture.commandLogPath);
+    expect(
+      commandsAfterUp.some(
+        (entry) =>
+          entry.tool === "docker" &&
+          entry.args[0] === "exec" &&
+          entry.user === "root" &&
+          typeof entry.script === "string" &&
+          entry.script.includes('if [ "$comm" = "sshd" ]; then'),
+      ),
+    ).toBe(true);
 
     const excludeContent = await readFile(path.join(fixture.workspacePath, ".git", "info", "exclude"), "utf8");
     expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
