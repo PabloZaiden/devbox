@@ -214,7 +214,7 @@ async function handleUpLike(
     console.log("Syncing Git author identity from the host into the devcontainer...");
     await configureGitIdentity(upResult.containerId, environment.gitUserName, environment.gitUserEmail);
   }
-  await stopManagedSshd(upResult.containerId);
+  await stopManagedSshd(upResult.containerId, port);
   await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
   const runnerCredentials = await runStepWithHeartbeat({
     startMessage: "Installing and starting the SSH server inside the container (first run can take a bit)...",

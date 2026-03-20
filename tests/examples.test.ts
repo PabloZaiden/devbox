@@ -407,7 +407,8 @@ describe("example workspaces (simulated host tools)", () => {
           entry.args[0] === "exec" &&
           entry.user === "root" &&
           typeof entry.script === "string" &&
-          entry.script.includes('if [ "$comm" = "sshd" ]; then'),
+          entry.script.includes("target_port=':1389'") &&
+          entry.script.includes("/proc/net/tcp /proc/net/tcp6"),
       ),
     ).toBe(true);
 

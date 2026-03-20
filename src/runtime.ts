@@ -72,10 +72,25 @@ export function isExecutableAvailable(command: string): boolean {
   return findExecutableOnPath(command) !== null;
 }
 
-export function buildStopManagedSshdScript(): string {
+export function buildStopManagedSshdScript(port: number): string {
+  const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
   return [
-    "pids=$(ps -eo pid=,comm= | while read -r pid comm; do",
-    '  if [ "$comm" = "sshd" ]; then printf \'%s\\n\' "$pid"; fi',
+    `target_port=${quoteShell(`:${hexPort}`)}`,
+    "target_inodes=$(awk -v target_port=\"$target_port\" 'NR > 1 && $2 ~ (target_port \"$\") && $4 == \"0A\" { print $10 }' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -u)",
+    'if [ -z "$target_inodes" ]; then exit 0; fi',
+    "pids=$(for proc in /proc/[0-9]*; do",
+    '  pid="${proc#/proc/}"',
+    '  comm=$(cat "$proc/comm" 2>/dev/null || true)',
+    '  if [ "$comm" != "sshd" ]; then continue; fi',
+    '  for fd in "$proc"/fd/*; do',
+    '    link=$(readlink "$fd" 2>/dev/null || true)',
+    '    for inode in $target_inodes; do',
+    '      if [ "$link" = "socket:[$inode]" ]; then',
+    '        printf \'%s\\n\' "$pid"',
+    "        continue 3",
+    "      fi",
+    "    done",
+    "  done",
     "done)",
     'if [ -n "$pids" ]; then kill $pids; fi',
   ].join("\n");
@@ -572,8 +587,8 @@ export async function configureGitIdentity(
   await devcontainerExec(containerId, script, { quiet: true });
 }
 
-export async function stopManagedSshd(containerId: string): Promise<void> {
-  await dockerExec(containerId, buildStopManagedSshdScript(), {
+export async function stopManagedSshd(containerId: string, port: number): Promise<void> {
+  await dockerExec(containerId, buildStopManagedSshdScript(port), {
     quiet: true,
     user: "root",
   });
