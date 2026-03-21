@@ -108,10 +108,14 @@ describe("resolveSshAuthSockSource", () => {
 });
 
 describe("buildStopManagedSshdScript", () => {
-  test("uses newlines for the while loop body", () => {
-    expect(buildStopManagedSshdScript()).toContain("while read -r pid comm; do\n");
-    expect(buildStopManagedSshdScript()).toContain('\ndone)\n');
-    expect(buildStopManagedSshdScript()).not.toContain("do;");
+  test("targets only sshd listeners on the managed port", () => {
+    const script = buildStopManagedSshdScript(5001);
+    expect(script).toContain("target_port=':1389'");
+    expect(script).toContain("/proc/net/tcp /proc/net/tcp6");
+    expect(script).toContain('if [ "$comm" != "sshd" ]; then continue; fi');
+    expect(script).toContain('if [ "$link" = "socket:[$inode]" ]; then');
+    expect(script).toContain('\ndone)\n');
+    expect(script).not.toContain("do;");
   });
 });
 
