@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, appendFile, mkdir, readFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -376,7 +376,11 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
     return;
   }
 
-  const relative = path.relative(gitTopLevel, absolutePath);
+  const [resolvedGitTopLevel, resolvedAbsolutePath] = await Promise.all([
+    tryResolveRealpath(gitTopLevel),
+    tryResolveRealpath(absolutePath),
+  ]);
+  const relative = path.relative(resolvedGitTopLevel, resolvedAbsolutePath);
   if (!relative || relative.startsWith("..")) {
     return;
   }
@@ -402,6 +406,14 @@ export async function ensurePathIgnored(workspacePath: string, absolutePath: str
 
   const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : "";
   await appendFile(excludePath, `${prefix}${normalized}\n`, "utf8");
+}
+
+async function tryResolveRealpath(targetPath: string): Promise<string> {
+  try {
+    return await realpath(targetPath);
+  } catch {
+    return targetPath;
+  }
 }
 
 export async function listManagedContainers(labels: Record<string, string>): Promise<string[]> {
