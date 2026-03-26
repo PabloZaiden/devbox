@@ -59,6 +59,10 @@ describe("parseArgs", () => {
     expect(parseArgs(["status"])).toEqual({ command: "status", allowMissingSsh: false });
   });
 
+  test("supports the arise subcommand", () => {
+    expect(parseArgs(["arise"])).toEqual({ command: "arise", allowMissingSsh: false });
+  });
+
   test("supports selecting a devcontainer subpath", () => {
     expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
       command: "up",
@@ -104,6 +108,16 @@ describe("parseArgs", () => {
       "The status command does not accept --allow-missing-ssh.",
     );
   });
+
+  test("arise rejects ports and unrelated options", () => {
+    expect(() => parseArgs(["arise", "5001"])).toThrow("The arise command does not accept a port.");
+    expect(() => parseArgs(["arise", "--devcontainer-subpath", "services/api"])).toThrow(
+      "The arise command does not accept --devcontainer-subpath.",
+    );
+    expect(() => parseArgs(["arise", "--allow-missing-ssh"])).toThrow(
+      "The arise command does not accept --allow-missing-ssh.",
+    );
+  });
 });
 
 describe("helpText", () => {
@@ -128,6 +142,7 @@ describe("helpText", () => {
     expect(text).toContain("rebuild");
     expect(text).toContain("shell");
     expect(text).toContain("status");
+    expect(text).toContain("arise");
     expect(text).toContain("down");
     expect(text).toContain("help");
   });

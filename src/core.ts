@@ -18,7 +18,7 @@ import {
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 
-export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "help";
+export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "arise" | "help";
 
 export interface ParsedArgs {
   command: CommandName;
@@ -69,10 +69,16 @@ export interface UpResult {
 
 export interface DockerInspect {
   Id: string;
+  Created?: string;
   Name?: string;
   Config?: {
     Labels?: Record<string, string>;
   };
+  Mounts?: Array<{
+    Type?: string;
+    Source?: string;
+    Destination?: string;
+  }>;
   State?: {
     Running?: boolean;
     Status?: string;
@@ -90,7 +96,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  status   Print JSON describing the managed devbox for this workspace.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  -h, --help                    Show this help.`;
+  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  status   Print JSON describing the managed devbox for this workspace.\n  arise    Restart stopped managed workspaces discovered from existing containers.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  -h, --help                    Show this help.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -103,7 +109,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let command: CommandName;
   const first = args[0];
 
-  if (first === "up" || first === "down" || first === "rebuild" || first === "shell" || first === "status") {
+  if (first === "up" || first === "down" || first === "rebuild" || first === "shell" || first === "status" || first === "arise") {
     command = first;
     args.shift();
   } else if (first === "help") {
@@ -182,6 +188,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (command === "status") {
       throw new UserError("The status command does not accept a port.");
     }
+    if (command === "arise") {
+      throw new UserError("The arise command does not accept a port.");
+    }
     port = parsePort(positionals[0]);
   }
 
@@ -197,6 +206,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The status command does not accept a port.");
   }
 
+  if (command === "arise" && port !== undefined) {
+    throw new UserError("The arise command does not accept a port.");
+  }
+
   if (command === "shell" && devcontainerSubpath !== undefined) {
     throw new UserError("The shell command does not accept --devcontainer-subpath.");
   }
@@ -205,8 +218,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The status command does not accept --devcontainer-subpath.");
   }
 
+  if (command === "arise" && devcontainerSubpath !== undefined) {
+    throw new UserError("The arise command does not accept --devcontainer-subpath.");
+  }
+
   if (command === "status" && allowMissingSsh) {
     throw new UserError("The status command does not accept --allow-missing-ssh.");
+  }
+
+  if (command === "arise" && allowMissingSsh) {
+    throw new UserError("The arise command does not accept --allow-missing-ssh.");
   }
 
   if (devcontainerSubpath) {
@@ -346,7 +367,7 @@ export async function deleteWorkspaceState(workspacePath: string): Promise<void>
 }
 
 export function resolvePort(command: CommandName, explicitPort: number | undefined, state: WorkspaceState | null): number {
-  if (command === "down" || command === "shell" || command === "help") {
+  if (command === "down" || command === "shell" || command === "arise" || command === "help") {
     throw new UserError(`resolvePort cannot be used for ${command}.`);
   }
 
