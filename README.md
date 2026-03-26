@@ -170,7 +170,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
 - `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` password file and `.devbox-ssh.json` metadata when the container is stopped or Docker is unavailable.
 - `devbox arise` only attempts workspaces it can recover from stopped managed containers and that still have at least one persisted devbox leftover, such as saved state, `.sshcred`, `.devbox-ssh.json`, or `.devbox-ssh-host-keys/`.
-- If a workspace has more than one stopped managed container, `devbox arise` keeps the newest stopped container as the source of truth, removes the older stopped duplicates, and then reruns `devbox up`.
+- For workspaces that pass the restart-readiness checks and are actually attempted, if there is more than one stopped managed container, `devbox arise` keeps the newest stopped container as the source of truth, removes the older stopped duplicates, and then reruns `devbox up`. Skipped or unrecoverable workspaces may retain older stopped duplicates.
 - `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
 - `down` removes managed containers but does not delete the workspace `.sshcred`, `.devbox-ssh.json`, or `.devbox-ssh-host-keys/`, so the SSH password, SSH metadata, and SSH host identity survive rebuilds.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
