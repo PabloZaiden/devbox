@@ -58,16 +58,23 @@ import {
   DEFAULT_UP_AUTO_PORT_START,
   DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+  MANAGED_LABEL_KEY,
   RUNNER_CRED_FILENAME,
   RUNNER_HOST_KEYS_DIRNAME,
 } from "./constants";
 import { createRunnerMetadata, serializeRunnerMetadata } from "./runnerState";
 import { getDevboxStatus } from "./status";
+import { ariseManagedWorkspaces } from "./arise";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
   if (parsed.command === "help") {
     console.log(helpText());
+    return;
+  }
+
+  if (parsed.command === "arise") {
+    await handleArise();
     return;
   }
 
@@ -329,6 +336,34 @@ async function handleStatus(
   console.log(JSON.stringify(status, null, 2));
 }
 
+async function handleArise(): Promise<void> {
+  if (!isExecutableAvailable("docker")) {
+    throw new UserError("Docker is required but was not found in PATH.");
+  }
+
+  if (!isExecutableAvailable("devcontainer")) {
+    throw new UserError("Dev Container CLI is required but was not found in PATH.");
+  }
+
+  const summary = await ariseManagedWorkspaces({
+    loadManagedContainers: async () => {
+      const containerIds = await listManagedContainers({ [MANAGED_LABEL_KEY]: "true" });
+      return inspectContainers(containerIds);
+    },
+    loadWorkspaceState,
+    removeContainers,
+    restartWorkspace: async (input) => {
+      await handleUpLike("up", input.workspacePath, input.state, input.explicitPort, false, input.devcontainerSubpath);
+    },
+    log: (message) => console.log(message),
+    formatError: formatAriseError,
+  });
+
+  if (summary.failedWorkspaces.length > 0) {
+    process.exitCode = 1;
+  }
+}
+
 function getPublishedHostPorts(container: DockerInspect): number[] {
   const ports = container.NetworkSettings?.Ports ?? {};
   const values = new Set<number>();
@@ -389,6 +424,22 @@ function formatElapsed(milliseconds: number): string {
   }
 
   return `${minutes}m ${seconds}s`;
+}
+
+function formatAriseError(error: unknown): string {
+  if (error instanceof UserError) {
+    return error.message;
+  }
+
+  if (isCommandError(error)) {
+    return formatCommandError(error);
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 main().catch((error: unknown) => {

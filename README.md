@@ -73,6 +73,9 @@ devbox shell
 # Print machine-readable JSON describing the managed devbox for this workspace
 devbox status
 
+# Find stopped managed devbox containers and rerun `devbox up` for each recoverable workspace
+devbox arise
+
 # Stop and remove the managed container while preserving the workspace-mounted SSH password, metadata, and host keys
 devbox down
 ```
@@ -88,6 +91,8 @@ When you run `devbox rebuild`, omitting the port reuses the last stored port for
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
 
 `devbox status` always prints JSON so it can be used directly from scripts and automation.
+
+`devbox arise` is a global recovery command. It scans existing stopped devbox-managed containers, recovers each host workspace from the bind mount targeting `/workspaces/...`, checks that the workspace still has devbox leftovers from a previous `up` run, and then reruns `devbox up` for that workspace. It logs each discovery, skip, restart, and failure, and continues with the remaining workspaces if one restart fails.
 
 Example:
 
@@ -164,6 +169,8 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
 - `devbox status` reports live container state when available and falls back to saved workspace state plus the persisted `.sshcred` password file and `.devbox-ssh.json` metadata when the container is stopped or Docker is unavailable.
+- `devbox arise` only attempts workspaces it can recover from stopped managed containers and that still have at least one persisted devbox leftover, such as saved state, `.sshcred`, `.devbox-ssh.json`, or `.devbox-ssh-host-keys/`.
+- For workspaces that pass the restart-readiness checks and are actually attempted, if there is more than one stopped managed container, `devbox arise` keeps the newest stopped container as the source of truth, removes the older stopped duplicates, and then reruns `devbox up`. Skipped or unrecoverable workspaces may retain older stopped duplicates.
 - `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
 - `down` removes managed containers but does not delete the workspace `.sshcred`, `.devbox-ssh.json`, or `.devbox-ssh-host-keys/`, so the SSH password, SSH metadata, and SSH host identity survive rebuilds.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
