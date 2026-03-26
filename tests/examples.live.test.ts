@@ -24,7 +24,9 @@ const tempPaths: string[] = [];
 const cleanupTasks: Array<() => Promise<void>> = [];
 const skipLiveIntegration = process.env.DEVBOX_SKIP_LIVE_EXAMPLE_TESTS === "1";
 const canRunLiveIntegration = !skipLiveIntegration && canRunLivePrerequisites();
+const canRunAriseLiveIntegration = !skipLiveIntegration && canRunAriseLivePrerequisites();
 const liveTest = canRunLiveIntegration ? test.serial : test.skip;
+const liveAriseTest = canRunAriseLiveIntegration ? test.serial : test.skip;
 
 interface CommandResult {
   exitCode: number;
@@ -41,6 +43,7 @@ interface LiveFixtureOptions {
   };
   knownHosts?: string;
   requireSshAuthSock?: boolean;
+  useFallbackDevcontainer?: boolean;
 }
 
 interface RunnerArtifacts {
@@ -267,6 +270,74 @@ describe("example workspaces (real devcontainers)", () => {
     },
     { timeout: 12 * 60_000 },
   );
+
+  liveAriseTest(
+    "arise restarts a stopped managed workspace using real docker containers",
+    async () => {
+      const fixture = await setupLiveFixture("smoke-workspace", {
+        requireSshAuthSock: true,
+        useFallbackDevcontainer: true,
+      });
+      const up = runCli(fixture, ["up", String(fixture.port)]);
+      expect(up.exitCode).toBe(0);
+
+      const initialState = await readJson(fixture.statePath);
+      const initialContainerId = String(initialState.lastContainerId);
+      expect(inspectContainer(fixture, initialContainerId).State?.Running).toBe(true);
+
+      runCommand(["docker", "stop", initialContainerId], {
+        cwd: fixture.workspacePath,
+        env: fixture.env,
+      });
+
+      const stoppedInspect = inspectContainer(fixture, initialContainerId);
+      expect(stoppedInspect.State?.Running).toBe(false);
+      expect(existsSync(fixture.runnerCredPath)).toBe(true);
+      expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
+      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+
+      const arise = runCommand([process.execPath, "run", cliPath, "arise"], {
+        cwd: repoRoot,
+        env: fixture.env,
+      });
+
+      expect(arise.exitCode).toBe(0);
+      expect(arise.stdout).toContain("Scanning for stopped managed devbox containers...");
+      expect(arise.stdout).toContain(`Recovered ${fixture.workspacePath}`);
+      expect(arise.stdout).toContain(`Running \`devbox up\` again for ${fixture.workspacePath}...`);
+      expect(arise.stdout).toContain("Arise summary: restarted 1");
+
+      const restartedState = await readJson(fixture.statePath);
+      const restartedContainerId = String(restartedState.lastContainerId);
+      const restartedInspect = inspectContainer(fixture, restartedContainerId);
+      expect(restartedInspect.State?.Running).toBe(true);
+      expect(getPublishedHostPort(restartedInspect, fixture.port)).toBe(String(fixture.port));
+      expect(
+        restartedInspect.Mounts?.some(
+          (mount) =>
+            mount.Type === "bind" &&
+            mount.Source === fixture.workspacePath &&
+            mount.Destination === fixture.remoteWorkspaceFolder,
+        ),
+      ).toBe(true);
+      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([
+        String(fixture.port),
+        String(fixture.port),
+      ]);
+
+      const sample = execInContainer(
+        fixture,
+        restartedContainerId,
+        `cat ${quoteShell(path.posix.join(fixture.remoteWorkspaceFolder, "sample-file.txt"))}`,
+      );
+      expect(sample.exitCode).toBe(0);
+      expect(sample.stdout).toBe(await readFile(fixture.sampleFilePath, "utf8"));
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+    },
+    { timeout: 8 * 60_000 },
+  );
 });
 
 async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions = {}): Promise<LiveFixture> {
@@ -296,7 +367,11 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
 
   const forceNoDockerDesktopHostService = options.forceNoDockerDesktopHostService ?? !options.requireSshAuthSock;
   const wrappersDir = path.join(tempRoot, "bin");
-  await createHostToolWrappers(wrappersDir, { forceNoDockerDesktopHostService });
+  const fallbackDevcontainerImage = options.useFallbackDevcontainer ? resolveFallbackDevcontainerImage(exampleName) : null;
+  await createHostToolWrappers(wrappersDir, {
+    fallbackDevcontainerImage,
+    forceNoDockerDesktopHostService,
+  });
 
   const useDockerDesktopHostService = options.requireSshAuthSock && !forceNoDockerDesktopHostService && isDockerDesktopHost();
 
@@ -461,6 +536,10 @@ function canRunLivePrerequisites(): boolean {
   return canRunCommand(["docker", "info"]) && canRunCommand(["devcontainer", "--version"]);
 }
 
+function canRunAriseLivePrerequisites(): boolean {
+  return canRunCommand(["docker", "info"]) && (canRunCommand(["devcontainer", "--version"]) || resolveFallbackDevcontainerImage("smoke-workspace") !== null);
+}
+
 function isDockerDesktopHost(): boolean {
   try {
     const result = Bun.spawnSync(["docker", "info", "--format", "{{.OperatingSystem}}"], {
@@ -489,6 +568,41 @@ function canRunCommand(command: string[]): boolean {
   }
 }
 
+function resolveFallbackDevcontainerImage(exampleName: string): string | null {
+  const result = Bun.spawnSync(["docker", "image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], {
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  if ((result.exitCode ?? 1) !== 0) {
+    return null;
+  }
+
+  const images = Buffer.from(result.stdout)
+    .toString("utf8")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  const preferredPatterns =
+    exampleName === "complex-workspace"
+      ? [/^vsc-complex-workspace-.*-features:latest$/, /^vsc-complex-workspace-.*-features-uid:latest$/]
+      : [
+          /^vsc-workspace-.*-features:latest$/,
+          /^vsc-workspace-.*-features-uid:latest$/,
+          /^vsc-complex-workspace-.*-features:latest$/,
+          /^vsc-complex-workspace-.*-features-uid:latest$/,
+        ];
+
+  for (const pattern of preferredPatterns) {
+    const match = images.find((image) => pattern.test(image));
+    if (match) {
+      return match;
+    }
+  }
+
+  return images.find((image) => /^vsc-.*-features(?:-uid)?:latest$/.test(image)) ?? null;
+}
+
 async function resetWorkspaceArtifacts(workspacePath: string): Promise<void> {
   await rm(path.join(workspacePath, RUNNER_CRED_FILENAME), { force: true });
   await rm(path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME), { force: true, recursive: true });
@@ -497,7 +611,7 @@ async function resetWorkspaceArtifacts(workspacePath: string): Promise<void> {
 
 async function createHostToolWrappers(
   wrappersDir: string,
-  options: { forceNoDockerDesktopHostService: boolean },
+  options: { fallbackDevcontainerImage: string | null; forceNoDockerDesktopHostService: boolean },
 ): Promise<void> {
   await mkdir(wrappersDir, { recursive: true });
 
@@ -520,6 +634,21 @@ exec ${quoteShell(realDockerPath)} "$@"
       "utf8",
     );
     await chmod(dockerWrapperPath, 0o755);
+  }
+
+  if (options.fallbackDevcontainerImage) {
+    const realDockerPath = findExecutable("docker");
+    if (!realDockerPath) {
+      throw new Error("docker was not found in PATH.");
+    }
+
+    const devcontainerWrapperPath = path.join(wrappersDir, "devcontainer");
+    await writeFile(
+      devcontainerWrapperPath,
+      buildFallbackDevcontainerWrapper(realDockerPath, options.fallbackDevcontainerImage),
+      "utf8",
+    );
+    await chmod(devcontainerWrapperPath, 0o755);
   }
 
   const ghWrapperPath = path.join(wrappersDir, "gh");
@@ -589,7 +718,179 @@ else
   sudo sh -lc "$root_script"
 fi
 
-printf 'SSH user: root\\nSSH pass: password\\nSSH port: %s\\nPermitRootLogin: yes\\n' "$SSH_PORT"
+  printf 'SSH user: root\\nSSH pass: password\\nSSH port: %s\\nPermitRootLogin: yes\\n' "$SSH_PORT"
+`;
+}
+
+function buildFallbackDevcontainerWrapper(realDockerPath: string, image: string): string {
+  return `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const docker = ${JSON.stringify(realDockerPath)};
+const fallbackImage = ${JSON.stringify(image)};
+const args = process.argv.slice(2);
+
+function fail(message) {
+  process.stderr.write(message + "\\n");
+  process.exit(1);
+}
+
+function run(commandArgs, options = {}) {
+  const result = spawnSync(commandArgs[0], commandArgs.slice(1), {
+    cwd: options.cwd,
+    encoding: "utf8",
+    env: process.env,
+    stdio: options.capture === false ? "inherit" : ["ignore", "pipe", "pipe"],
+  });
+  if ((result.status ?? 1) !== 0) {
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+    }
+    process.exit(result.status ?? 1);
+  }
+  return result;
+}
+
+function parseFlagValues(name) {
+  const values = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === name) {
+      values.push(args[index + 1]);
+      index += 1;
+    }
+  }
+  return values;
+}
+
+function parseMount(spec) {
+  return Object.fromEntries(
+    spec.split(",").map((entry) => {
+      const separator = entry.indexOf("=");
+      return separator === -1 ? [entry, ""] : [entry.slice(0, separator), entry.slice(separator + 1)];
+    }),
+  );
+}
+
+function getContainerName(runArgs) {
+  for (let index = 0; index < runArgs.length; index += 1) {
+    if (runArgs[index] === "--name" && runArgs[index + 1]) {
+      return runArgs[index + 1];
+    }
+  }
+  return null;
+}
+
+function expandEnv(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const match = value.match(/^\\$\\{localEnv:([^}]+)\\}$/);
+  return match ? process.env[match[1]] ?? "" : value;
+}
+
+if (args.length === 1 && args[0] === "--version") {
+  process.stdout.write("devcontainer test wrapper\\n");
+  process.exit(0);
+}
+
+if (args[0] === "exec") {
+  let containerId = null;
+  let index = 1;
+  while (index < args.length) {
+    const current = args[index];
+    if (current === "--container-id") {
+      containerId = args[index + 1];
+      index += 2;
+      continue;
+    }
+    if (current === "--terminal-columns" || current === "--terminal-rows") {
+      index += 2;
+      continue;
+    }
+    break;
+  }
+
+  if (!containerId) {
+    fail("Missing --container-id");
+  }
+
+  const result = spawnSync(docker, ["exec", containerId, ...args.slice(index)], {
+    encoding: "utf8",
+    env: process.env,
+    stdio: "inherit",
+  });
+  process.exit(result.status ?? 1);
+}
+
+if (args[0] !== "up") {
+  fail("Unsupported devcontainer test wrapper command: " + args.join(" "));
+}
+
+const workspaceFolder = parseFlagValues("--workspace-folder")[0];
+const configPath = parseFlagValues("--config")[0];
+const labels = parseFlagValues("--id-label");
+
+if (!workspaceFolder || !configPath) {
+  fail("Missing required up arguments.");
+}
+
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const runArgs = Array.isArray(config.runArgs) ? config.runArgs.map(String) : [];
+const mounts = Array.isArray(config.mounts) ? config.mounts.map(String) : [];
+const containerEnv = config.containerEnv && typeof config.containerEnv === "object" ? config.containerEnv : {};
+const containerName = getContainerName(runArgs);
+if (!containerName) {
+  fail("Managed config did not include a container name.");
+}
+
+const remoteWorkspaceFolder = path.posix.join("/workspaces", path.basename(workspaceFolder));
+const existing = run([docker, "ps", "-aq", "--filter", "name=^/" + containerName + "$"]);
+let containerId = existing.stdout.trim().split(/\\s+/).filter(Boolean)[0];
+
+if (containerId) {
+  const running = run([docker, "inspect", "-f", "{{.State.Running}}", containerId]).stdout.trim();
+  if (running !== "true") {
+    run([docker, "start", containerId], { capture: false });
+  }
+} else {
+  const dockerArgs = [docker, "run", "-d", "--init", "--name", containerName, "-w", remoteWorkspaceFolder];
+  for (const label of labels) {
+    dockerArgs.push("--label", label);
+  }
+  dockerArgs.push("--mount", "type=bind,source=" + workspaceFolder + ",target=" + remoteWorkspaceFolder);
+
+  for (const mount of mounts) {
+    const parsed = parseMount(mount);
+    if (parsed.type === "bind" && parsed.source && parsed.target) {
+      dockerArgs.push("--mount", "type=bind,source=" + parsed.source + ",target=" + parsed.target);
+    }
+  }
+
+  for (let index = 0; index < runArgs.length; index += 1) {
+    const current = runArgs[index];
+    if (current === "--name") {
+      index += 1;
+      continue;
+    }
+    dockerArgs.push(current);
+  }
+
+  for (const [key, value] of Object.entries(containerEnv)) {
+    dockerArgs.push("--env", key + "=" + expandEnv(String(value)));
+  }
+
+  dockerArgs.push(fallbackImage, "sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 5; done");
+  const created = run(dockerArgs);
+  containerId = created.stdout.trim().split(/\\s+/).filter(Boolean)[0];
+}
+
+process.stdout.write(JSON.stringify({ type: "start", text: "Starting container" }) + "\\n");
+process.stdout.write(JSON.stringify({ containerId, outcome: "success", remoteWorkspaceFolder }) + "\\n");
 `;
 }
 
