@@ -52,6 +52,7 @@ interface ResolvedSshAuthSock {
 }
 
 export interface ResolvedHostEnvironment extends ResolvedSshAuthSock {
+  dockerRootless: boolean;
   gitUserName: string | null;
   gitUserEmail: string | null;
   githubToken: string | null;
@@ -357,8 +358,9 @@ export async function ensureHostEnvironment(options: {
 
   const hostEnvSshAuthSock = process.env.SSH_AUTH_SOCK?.trim() || undefined;
   const hostEnvSockExists = hostEnvSshAuthSock ? await pathExists(hostEnvSshAuthSock) : false;
-  const [dockerDesktopHostServiceAvailable, gitUserName, gitUserEmail, ghCliToken] = await Promise.all([
+  const [dockerDesktopHostServiceAvailable, dockerRootless, gitUserName, gitUserEmail, ghCliToken] = await Promise.all([
     hasDockerDesktopHostService(),
+    isDockerRootlessEngine(),
     tryGetGitConfig(options.workspacePath, "user.name"),
     tryGetGitConfig(options.workspacePath, "user.email"),
     tryGetGhCliToken(),
@@ -371,6 +373,7 @@ export async function ensureHostEnvironment(options: {
       dockerDesktopHostServiceAvailable,
       allowMissingSsh: options.allowMissingSsh,
     }),
+    dockerRootless,
     gitUserName,
     gitUserEmail,
     githubToken: ghCliToken.token,
@@ -732,6 +735,31 @@ async function hasDockerDesktopHostService(): Promise<boolean> {
   }
 
   return result.stdout.toLowerCase().includes("docker desktop");
+}
+
+export function isDockerRootlessSecurityOptions(securityOptions: string[]): boolean {
+  return securityOptions.some((option) => option.trim().toLowerCase() === "name=rootless");
+}
+
+async function isDockerRootlessEngine(): Promise<boolean> {
+  const result = await execute(["docker", "info", "--format", "{{json .SecurityOptions}}"], {
+    stdoutMode: "capture",
+    stderrMode: "capture",
+    allowFailure: true,
+  });
+
+  if (result.exitCode !== 0) {
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as unknown;
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")
+      ? isDockerRootlessSecurityOptions(parsed)
+      : false;
+  } catch {
+    return false;
+  }
 }
 
 async function devcontainerExec(

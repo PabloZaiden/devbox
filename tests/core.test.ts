@@ -387,6 +387,27 @@ describe("buildManagedConfig", () => {
     expect(JSON.stringify(managed)).toContain('"GH_TOKEN":"${localEnv:GH_TOKEN}"');
     expect(JSON.stringify(managed)).not.toContain("ghp_");
   });
+
+  test("forces root as the container user when requested", () => {
+    const managed = buildManagedConfig(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        remoteUser: "vscode",
+        containerUser: "vscode",
+      },
+      {
+        port: 5001,
+        containerName: "devbox-example-5001",
+        sshAuthSock: null,
+        knownHostsPath: null,
+        githubTokenAvailable: false,
+        forceRootUser: true,
+      },
+    );
+
+    expect(managed.remoteUser).toBe("root");
+    expect(managed.containerUser).toBe("root");
+  });
 });
 
 describe("prepareKnownHostsMount", () => {

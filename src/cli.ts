@@ -143,6 +143,7 @@ async function handleUpLike(
     sshAuthSock: environment.sshAuthSock,
     knownHostsPath: preparedKnownHosts.knownHostsPath,
     githubTokenAvailable: environment.githubToken !== null,
+    forceRootUser: process.platform === "linux" && environment.dockerRootless,
   });
 
   if (environment.warning) {
@@ -153,6 +154,11 @@ async function handleUpLike(
   }
   if (preparedKnownHosts.warning) {
     console.warn(`Warning: ${preparedKnownHosts.warning}`);
+  }
+  if (process.platform === "linux" && environment.dockerRootless) {
+    console.warn(
+      "Warning: Docker rootless remaps bind-mounted workspace ownership on Linux, so devbox is forcing the container user to root to keep the workspace writable.",
+    );
   }
 
   if (environment.sshAuthSock === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE) {

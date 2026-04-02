@@ -40,6 +40,7 @@ export interface ManagedConfigOptions {
   sshAuthSock: string | null;
   knownHostsPath: string | null;
   githubTokenAvailable?: boolean;
+  forceRootUser?: boolean;
 }
 
 export interface PreparedKnownHosts {
@@ -513,6 +514,11 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
     containerEnv.GH_TOKEN = "${localEnv:GH_TOKEN}";
   }
   managedConfig.containerEnv = containerEnv;
+
+  if (options.forceRootUser) {
+    managedConfig.remoteUser = "root";
+    managedConfig.containerUser = "root";
+  }
 
   return managedConfig;
 }
