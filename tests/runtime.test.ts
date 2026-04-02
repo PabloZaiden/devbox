@@ -20,6 +20,7 @@ import {
   getRunnerCredFile,
   getRunnerHostKeysDir,
   getRunnerSummaryLines,
+  isDockerRootlessSecurityOptions,
   isExecutableAvailable,
   looksLikeGhUnauthenticatedError,
   probePortAvailability,
@@ -467,6 +468,16 @@ describe("getRunnerCredFile", () => {
     expect(getRunnerCredFile("/workspaces/example-project/")).toBe(
       "/workspaces/example-project/.sshcred",
     );
+  });
+});
+
+describe("isDockerRootlessSecurityOptions", () => {
+  test("detects a rootless docker engine", () => {
+    expect(isDockerRootlessSecurityOptions(["name=seccomp,profile=builtin", "name=rootless"])).toBe(true);
+  });
+
+  test("ignores non-rootless security options", () => {
+    expect(isDockerRootlessSecurityOptions(["name=seccomp,profile=builtin", "name=cgroupns"])).toBe(false);
   });
 });
 
