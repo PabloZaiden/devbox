@@ -77,6 +77,19 @@ describe("parseArgs", () => {
     });
   });
 
+  test("supports selecting an explicit SSH public key file", () => {
+    expect(parseArgs(["up", "--ssh-public-key", "/tmp/id_ed25519.pub"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      sshPublicKeyPath: "/tmp/id_ed25519.pub",
+    });
+    expect(parseArgs(["rebuild", "--ssh-public-key=./keys/devbox.pub"])).toEqual({
+      command: "rebuild",
+      allowMissingSsh: false,
+      sshPublicKeyPath: "./keys/devbox.pub",
+    });
+  });
+
   test("requires an explicit command for options or ports", () => {
     expect(() => parseArgs(["5001"])).toThrow("A command is required.");
     expect(() => parseArgs(["--devcontainer-subpath=python"])).toThrow("A command is required.");
@@ -97,6 +110,9 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["shell", "--devcontainer-subpath", "services/api"])).toThrow(
       "The shell command does not accept --devcontainer-subpath.",
     );
+    expect(() => parseArgs(["shell", "--ssh-public-key", "/tmp/id_rsa.pub"])).toThrow(
+      "The shell command does not accept --ssh-public-key.",
+    );
   });
 
   test("status rejects ports and unrelated options", () => {
@@ -107,6 +123,9 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["status", "--allow-missing-ssh"])).toThrow(
       "The status command does not accept --allow-missing-ssh.",
     );
+    expect(() => parseArgs(["status", "--ssh-public-key", "/tmp/id_rsa.pub"])).toThrow(
+      "The status command does not accept --ssh-public-key.",
+    );
   });
 
   test("arise rejects ports and unrelated options", () => {
@@ -116,6 +135,9 @@ describe("parseArgs", () => {
     );
     expect(() => parseArgs(["arise", "--allow-missing-ssh"])).toThrow(
       "The arise command does not accept --allow-missing-ssh.",
+    );
+    expect(() => parseArgs(["arise", "--ssh-public-key", "/tmp/id_rsa.pub"])).toThrow(
+      "The arise command does not accept --ssh-public-key.",
     );
   });
 });

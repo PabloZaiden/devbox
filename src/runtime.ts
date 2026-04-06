@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
@@ -48,6 +49,13 @@ interface ExecOptions {
 
 interface ResolvedSshAuthSock {
   sshAuthSock: string | null;
+  warning?: string;
+}
+
+export interface ResolvedSshPublicKey {
+  publicKey: string | null;
+  sourcePath: string | null;
+  source: "default" | "override" | null;
   warning?: string;
 }
 
@@ -250,6 +258,40 @@ export function buildConfigureGitIdentityScript(input: {
   ].join("\n");
 }
 
+export function buildConfigureAuthorizedKeysScript(input: {
+  sshUser: string;
+  stagedAuthorizedKeysPath?: string;
+}): string {
+  const stagedAuthorizedKeysPath = input.stagedAuthorizedKeysPath ?? "/run/devbox-authorized_keys";
+  return [
+    `ssh_user=${quoteShell(input.sshUser)}`,
+    `staged_keys=${quoteShell(stagedAuthorizedKeysPath)}`,
+    'if [ ! -s "$staged_keys" ]; then',
+    '  printf \'%s\\n\' "SSH public key staging file is missing or empty: $staged_keys" >&2',
+    "  exit 1",
+    "fi",
+    'if [ "$ssh_user" = "root" ]; then',
+    '  ssh_home="/root"',
+    "else",
+    '  ssh_home=$(awk -F: -v user="$ssh_user" \'$1 == user { print $6; exit }\' /etc/passwd)',
+    "fi",
+    'if [ -z "${ssh_home:-}" ]; then',
+    '  printf \'%s\\n\' "Could not determine the home directory for SSH user: $ssh_user" >&2',
+    "  exit 1",
+    "fi",
+    'install -d -m 700 "$ssh_home/.ssh"',
+    'cp "$staged_keys" "$ssh_home/.ssh/authorized_keys"',
+    'chmod 600 "$ssh_home/.ssh/authorized_keys"',
+    'if [ "$ssh_user" = "root" ]; then',
+    '  chown -R root:root "$ssh_home/.ssh"',
+    "else",
+    '  ssh_group=$(id -gn "$ssh_user")',
+    '  chown -R "$ssh_user:$ssh_group" "$ssh_home/.ssh"',
+    "fi",
+    'rm -f "$staged_keys"',
+  ].join("\n");
+}
+
 export function buildInteractiveShellScript(): string {
   return [
     "if command -v bash >/dev/null 2>&1; then",
@@ -308,6 +350,52 @@ export function buildCopyKnownHostsScript(sourcePath = KNOWN_HOSTS_TARGET): stri
     "  fi",
     "fi",
   ].join("\n");
+}
+
+export async function resolveSshPublicKey(input: {
+  overridePath?: string;
+  homeDir?: string;
+}): Promise<ResolvedSshPublicKey> {
+  const defaultPath = path.join(input.homeDir ?? os.homedir(), ".ssh", "id_rsa.pub");
+
+  if (input.overridePath) {
+    const content = await readAndValidateSshPublicKey(input.overridePath, {
+      sourceDescription: `SSH public key override file`,
+      treatMissingAsNull: false,
+    });
+    return {
+      publicKey: content,
+      sourcePath: input.overridePath,
+      source: "override",
+    };
+  }
+
+  try {
+    const content = await readAndValidateSshPublicKey(defaultPath, {
+      sourceDescription: "Default SSH public key file",
+      treatMissingAsNull: true,
+    });
+    if (content === null) {
+      return {
+        publicKey: null,
+        sourcePath: null,
+        source: null,
+      };
+    }
+
+    return {
+      publicKey: content,
+      sourcePath: defaultPath,
+      source: "default",
+    };
+  } catch (error) {
+    return {
+      publicKey: null,
+      sourcePath: null,
+      source: null,
+      warning: error instanceof Error ? `${error.message} Continuing without SSH public key auth.` : String(error),
+    };
+  }
 }
 
 export function resolveSshAuthSockSource(input: {
@@ -590,6 +678,26 @@ export async function configureGitIdentity(
   await devcontainerExec(containerId, script, { quiet: true });
 }
 
+export async function configureAuthorizedKeys(
+  containerId: string,
+  sshUser: string,
+  authorizedKeysContent: string,
+): Promise<void> {
+  const stagedAuthorizedKeysPath = "/run/devbox-authorized_keys";
+  await dockerWriteTextFile(containerId, authorizedKeysContent, stagedAuthorizedKeysPath, "600");
+  await dockerExec(
+    containerId,
+    buildConfigureAuthorizedKeysScript({
+      sshUser,
+      stagedAuthorizedKeysPath,
+    }),
+    {
+      quiet: true,
+      user: "root",
+    },
+  );
+}
+
 export async function stopManagedSshd(containerId: string, port: number): Promise<void> {
   await dockerExec(containerId, buildStopManagedSshdScript(port), {
     quiet: true,
@@ -776,6 +884,16 @@ async function devcontainerExec(
 
 async function dockerWriteFile(containerId: string, sourcePath: string, destinationPath: string): Promise<void> {
   const content = await readFile(sourcePath);
+  await dockerWriteTextFile(containerId, content, destinationPath, "644", "<streamed file>");
+}
+
+async function dockerWriteTextFile(
+  containerId: string,
+  content: string | Uint8Array,
+  destinationPath: string,
+  mode: string,
+  commandLabel = "<streamed file>",
+): Promise<void> {
   const subprocess = spawn(
     "docker",
     [
@@ -786,7 +904,7 @@ async function dockerWriteFile(containerId: string, sourcePath: string, destinat
       containerId,
       "sh",
       "-lc",
-      `cat > ${quoteShell(destinationPath)} && chmod 644 ${quoteShell(destinationPath)}`,
+      `cat > ${quoteShell(destinationPath)} && chmod ${quoteShell(mode)} ${quoteShell(destinationPath)}`,
     ],
     {
       env: process.env,
@@ -807,7 +925,7 @@ async function dockerWriteFile(containerId: string, sourcePath: string, destinat
   const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
 
   if (exitCode !== 0) {
-    throw new CommandError(["docker", "exec", "-i", "--user", "root", containerId, "sh", "-lc", "<streamed known_hosts>"], {
+    throw new CommandError(["docker", "exec", "-i", "--user", "root", containerId, "sh", "-lc", commandLabel], {
       stdout,
       stderr,
       exitCode,
@@ -892,6 +1010,81 @@ async function tryGetGitConfig(workspacePath: string, key: "user.name" | "user.e
 
   const trimmed = result.stdout.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+async function readAndValidateSshPublicKey(
+  filePath: string,
+  options: {
+    sourceDescription: string;
+    treatMissingAsNull: boolean;
+  },
+): Promise<string | null> {
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf8");
+  } catch (error) {
+    if (options.treatMissingAsNull && getErrorCode(error) === "ENOENT") {
+      return null;
+    }
+    throw new UserError(`${options.sourceDescription} could not be read: ${filePath} (${formatErrorMessage(error)}).`);
+  }
+
+  const normalized = normalizeAuthorizedKeysContent(content);
+  if (normalized === null) {
+    throw new UserError(`${options.sourceDescription} is empty or not a valid SSH public key: ${filePath}.`);
+  }
+
+  return normalized;
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function normalizeAuthorizedKeysContent(content: string): string | null {
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  if (lines.some((line) => !looksLikeAuthorizedKeysLine(line))) {
+    return null;
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function looksLikeAuthorizedKeysLine(line: string): boolean {
+  const supportedKeyTypes = new Set([
+    "ssh-rsa",
+    "ssh-ed25519",
+    "ssh-dss",
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+    "sk-ssh-ed25519@openssh.com",
+    "sk-ecdsa-sha2-nistp256@openssh.com",
+  ]);
+
+  const fields = line.split(/\s+/);
+  const keyTypeIndex = fields.findIndex((field) => supportedKeyTypes.has(field));
+  if (keyTypeIndex === -1 || keyTypeIndex >= fields.length - 1) {
+    return false;
+  }
+
+  return /^[A-Za-z0-9+/=]+$/.test(fields[keyTypeIndex + 1]);
 }
 
 export function resolveGhCliToken(input: {

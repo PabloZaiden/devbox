@@ -12,6 +12,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Publishes the same TCP port on host and container.
 - Mounts the current directory into the container as the workspace.
 - Shares a usable SSH agent socket with the container and copies a validated, non-empty `known_hosts` snapshot into the container.
+- Exposes the SSH service on the chosen host port and, when a host public key is available, installs it for key-based SSH login inside the devcontainer.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
 - Runs the [`ssh-server-runner`](https://github.com/PabloZaiden/ssh-server-runner) one-liner inside the devcontainer.
 - Persists the runner password on the mounted workspace as a local `.sshcred` file, stores devbox-owned SSH metadata in `.devbox-ssh.json`, and keeps SSH host keys in `.devbox-ssh-host-keys/`, so they survive `down` / `rebuild`.
@@ -60,6 +61,9 @@ devbox up
 
 # Continue even if SSH agent sharing is unavailable
 devbox up <port> --allow-missing-ssh
+
+# Override the public key installed for SSH login inside the container
+devbox up <port> --ssh-public-key ~/.ssh/work-devbox.pub
 
 # Use a specific devcontainer under .devcontainer/services/api
 devbox up <port> --devcontainer-subpath services/api
@@ -118,6 +122,8 @@ Example:
 ```
 
 The full payload also includes useful diagnostic fields such as `workspaceHash`, `labels`, `publishedPorts`, `statePath`, `credentialPath`, `sshMetadataPath`, `updatedAt`, and the stored/generated config paths.
+
+When available, the status payload also includes `publicKeyConfigured` and `publicKeySource` so automation can tell whether devbox installed a host SSH public key for key-based login.
 
 ## Development
 
@@ -178,4 +184,6 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
 - `devbox` stages a snapshot of the host `~/.ssh/known_hosts` before startup and skips injection with a warning when that file is missing, unreadable, empty, symlinked, or not a regular file.
+- `devbox` tries to install the host public key from `~/.ssh/id_rsa.pub` for SSH key-based login inside the container; if that default file is missing, it simply skips that step.
+- `--ssh-public-key /path/to/key.pub` overrides the default public key source. The override is validated and must point to a readable SSH public key file.
 - When the host already has Git author identity configured, `devbox` copies it into the container user's global Git config if the container does not already define those values.

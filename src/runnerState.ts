@@ -10,6 +10,8 @@ export interface RunnerMetadata {
   sshUser: string | null;
   sshPort: number | null;
   permitRootLogin: boolean | null;
+  publicKeyConfigured: boolean | null;
+  publicKeySource: string | null;
 }
 
 export const RUNNER_METADATA_VERSION = 1;
@@ -51,12 +53,16 @@ export function createRunnerMetadata(input: {
   sshUser: string | null;
   sshPort: number | null;
   permitRootLogin: boolean | null;
+  publicKeyConfigured?: boolean | null;
+  publicKeySource?: string | null;
 }): RunnerMetadata {
   return {
     version: RUNNER_METADATA_VERSION,
     sshUser: normalizeString(input.sshUser),
     sshPort: normalizePort(input.sshPort),
     permitRootLogin: input.permitRootLogin ?? null,
+    publicKeyConfigured: typeof input.publicKeyConfigured === "boolean" ? input.publicKeyConfigured : null,
+    publicKeySource: normalizeString(input.publicKeySource),
   };
 }
 
@@ -81,6 +87,8 @@ export function parseRunnerMetadata(content: string): RunnerMetadata {
     sshUser: normalizeString(record.sshUser),
     sshPort: normalizePort(record.sshPort),
     permitRootLogin: typeof record.permitRootLogin === "boolean" ? record.permitRootLogin : null,
+    publicKeyConfigured: typeof record.publicKeyConfigured === "boolean" ? record.publicKeyConfigured : null,
+    publicKeySource: normalizeString(record.publicKeySource),
   };
 }
 

@@ -90,6 +90,8 @@ describe("getDevboxStatus", () => {
                 sshUser: "vscode",
                 sshPort: 5001,
                 permitRootLogin: false,
+                publicKeyConfigured: true,
+                publicKeySource: "/home/me/.ssh/id_rsa.pub",
               }),
             );
           }
@@ -109,6 +111,8 @@ describe("getDevboxStatus", () => {
     expect(status.sshUser).toBe("vscode");
     expect(status.sshPort).toBe(5001);
     expect(status.permitRootLogin).toBe(false);
+    expect(status.publicKeyConfigured).toBe(true);
+    expect(status.publicKeySource).toBe("/home/me/.ssh/id_rsa.pub");
     expect(status.workdir).toBe("/custom/workdir");
     expect(status.workdirSource).toBe("config");
     expect(status.remoteUser).toBe("vscode");
@@ -139,6 +143,7 @@ describe("getDevboxStatus", () => {
                 sshUser: "root",
                 sshPort: 5010,
                 permitRootLogin: true,
+                publicKeyConfigured: false,
               }),
             );
           }
@@ -155,6 +160,8 @@ describe("getDevboxStatus", () => {
     expect(status.sshUser).toBe("root");
     expect(status.sshPort).toBe(5010);
     expect(status.permitRootLogin).toBe(true);
+    expect(status.publicKeyConfigured).toBe(false);
+    expect(status.publicKeySource).toBeNull();
     expect(status.workdir).toBe("/workspaces/no-state");
     expect(status.workdirSource).toBe("default");
     expect(status.hasStateFile).toBe(false);
