@@ -25,6 +25,7 @@ export interface ParsedArgs {
   port?: number;
   allowMissingSsh: boolean;
   devcontainerSubpath?: string;
+  sshPublicKeyPath?: string;
 }
 
 export type DevcontainerConfig = Record<string, unknown>;
@@ -97,7 +98,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  status   Print JSON describing the managed devbox for this workspace.\n  arise    Restart stopped managed workspaces discovered from existing containers.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  -h, --help                    Show this help.`;
+  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  status   Print JSON describing the managed devbox for this workspace.\n  arise    Restart stopped managed workspaces discovered from existing containers.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>       Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  -h, --help                    Show this help.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -124,6 +125,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let port: number | undefined;
   let allowMissingSsh = false;
   let devcontainerSubpath: string | undefined;
+  let sshPublicKeyPath: string | undefined;
   const positionals: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -150,6 +152,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg.startsWith("--devcontainer-subpath=")) {
       devcontainerSubpath = parseDevcontainerSubpath(arg.slice("--devcontainer-subpath=".length));
+      continue;
+    }
+
+    if (arg === "--ssh-public-key") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --ssh-public-key.");
+      }
+      sshPublicKeyPath = parseCliPathOption(value, "--ssh-public-key");
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--ssh-public-key=")) {
+      sshPublicKeyPath = parseCliPathOption(arg.slice("--ssh-public-key=".length), "--ssh-public-key");
       continue;
     }
 
@@ -223,6 +240,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The arise command does not accept --devcontainer-subpath.");
   }
 
+  if (command === "down" && sshPublicKeyPath !== undefined) {
+    throw new UserError("The down command does not accept --ssh-public-key.");
+  }
+
+  if (command === "shell" && sshPublicKeyPath !== undefined) {
+    throw new UserError("The shell command does not accept --ssh-public-key.");
+  }
+
+  if (command === "status" && sshPublicKeyPath !== undefined) {
+    throw new UserError("The status command does not accept --ssh-public-key.");
+  }
+
+  if (command === "arise" && sshPublicKeyPath !== undefined) {
+    throw new UserError("The arise command does not accept --ssh-public-key.");
+  }
+
   if (command === "status" && allowMissingSsh) {
     throw new UserError("The status command does not accept --allow-missing-ssh.");
   }
@@ -231,8 +264,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The arise command does not accept --allow-missing-ssh.");
   }
 
-  if (devcontainerSubpath) {
-    return { command, port, allowMissingSsh, devcontainerSubpath };
+  if (devcontainerSubpath || sshPublicKeyPath) {
+    return {
+      command,
+      port,
+      allowMissingSsh,
+      ...(devcontainerSubpath ? { devcontainerSubpath } : {}),
+      ...(sshPublicKeyPath ? { sshPublicKeyPath } : {}),
+    };
   }
 
   return { command, port, allowMissingSsh };
@@ -645,6 +684,15 @@ function parseDevcontainerSubpath(raw: string): string {
   }
 
   return path.join(...segments);
+}
+
+function parseCliPathOption(raw: string, optionName: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new UserError(`${optionName} cannot be empty.`);
+  }
+
+  return trimmed;
 }
 
 function getDevcontainerCandidates(workspacePath: string, devcontainerSubpath?: string): string[] {

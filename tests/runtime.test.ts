@@ -6,6 +6,7 @@ import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
 import type { DockerInspect } from "../src/core";
 import {
   buildAssertConfiguredSshAuthSockScript,
+  buildConfigureAuthorizedKeysScript,
   buildCopyKnownHostsScript,
   buildConfigureGitIdentityScript,
   buildDevcontainerShellCommand,
@@ -25,6 +26,7 @@ import {
   looksLikeGhUnauthenticatedError,
   probePortAvailability,
   redactSensitiveOutput,
+  resolveSshPublicKey,
   resolveShellContainerId,
   resolveGhCliToken,
   requiresSshAuthSockPermissionFix,
@@ -321,6 +323,85 @@ describe("buildConfigureGitIdentityScript", () => {
 
     expect(script).not.toContain("user.name");
     expect(script).toContain("git config --global user.email 'pablo+dev@example.com'");
+  });
+});
+
+describe("resolveSshPublicKey", () => {
+  test("uses an explicit override path when provided", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-key-"));
+    tempPaths.push(tempDir);
+    const keyPath = path.join(tempDir, "id_ed25519.pub");
+    await writeFile(keyPath, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBVtestvalue user@example\n");
+
+    await expect(resolveSshPublicKey({ overridePath: keyPath, homeDir: tempDir })).resolves.toEqual({
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBVtestvalue user@example\n",
+      sourcePath: keyPath,
+      source: "override",
+    });
+  });
+
+  test("uses the default ~/.ssh/id_rsa.pub when available", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-key-"));
+    tempPaths.push(tempDir);
+    await mkdir(path.join(tempDir, ".ssh"), { recursive: true });
+    const defaultPath = path.join(tempDir, ".ssh", "id_rsa.pub");
+    await writeFile(defaultPath, "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC1test user@example\n");
+
+    await expect(resolveSshPublicKey({ homeDir: tempDir })).resolves.toEqual({
+      publicKey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC1test user@example\n",
+      sourcePath: defaultPath,
+      source: "default",
+    });
+  });
+
+  test("ignores the default key when it is missing", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-key-"));
+    tempPaths.push(tempDir);
+
+    await expect(resolveSshPublicKey({ homeDir: tempDir })).resolves.toEqual({
+      publicKey: null,
+      sourcePath: null,
+      source: null,
+    });
+  });
+
+  test("fails when an explicit override file is missing", async () => {
+    await expect(resolveSshPublicKey({ overridePath: "/tmp/does-not-exist.pub" })).rejects.toThrow(
+      "SSH public key override file could not be read: /tmp/does-not-exist.pub",
+    );
+  });
+
+  test("warns and continues when the default key content is invalid", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-key-"));
+    tempPaths.push(tempDir);
+    await mkdir(path.join(tempDir, ".ssh"), { recursive: true });
+    await writeFile(path.join(tempDir, ".ssh", "id_rsa.pub"), "not-a-public-key\n");
+
+    await expect(resolveSshPublicKey({ homeDir: tempDir })).resolves.toEqual({
+      publicKey: null,
+      sourcePath: null,
+      source: null,
+      warning:
+        `Default SSH public key file is empty or not a valid SSH public key: ${path.join(tempDir, ".ssh", "id_rsa.pub")}. Continuing without SSH public key auth.`,
+    });
+  });
+});
+
+describe("buildConfigureAuthorizedKeysScript", () => {
+  test("creates ~/.ssh/authorized_keys for the resolved ssh user", () => {
+    const script = buildConfigureAuthorizedKeysScript({
+      sshUser: "vscode",
+      stagedAuthorizedKeysPath: "/run/devbox-authorized_keys",
+    });
+
+    expect(script).toContain("ssh_user='vscode'");
+    expect(script).toContain('staged_keys=\'/run/devbox-authorized_keys\'');
+    expect(script).toContain('ssh_home=$(awk -F: -v user="$ssh_user"');
+    expect(script).toContain('install -d -m 700 "$ssh_home/.ssh"');
+    expect(script).toContain('cp "$staged_keys" "$ssh_home/.ssh/authorized_keys"');
+    expect(script).toContain('chmod 600 "$ssh_home/.ssh/authorized_keys"');
+    expect(script).toContain('ssh_group=$(id -gn "$ssh_user")');
+    expect(script).toContain('chown -R "$ssh_user:$ssh_group" "$ssh_home/.ssh"');
   });
 });
 

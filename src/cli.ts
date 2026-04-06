@@ -32,6 +32,7 @@ import {
   assertConfiguredSshAuthSockAvailable,
   assertPortAvailable,
   configureGitIdentity,
+  configureAuthorizedKeys,
   copyKnownHosts,
   devcontainerUp,
   ensureSshAuthSockAccessible,
@@ -47,6 +48,7 @@ import {
   listManagedContainers,
   openInteractiveShell,
   persistRunnerHostKeys,
+  resolveSshPublicKey,
   resolveShellContainerId,
   requiresSshAuthSockPermissionFix,
   removeContainers,
@@ -96,7 +98,15 @@ async function main(): Promise<void> {
     return;
   }
 
-  await handleUpLike(parsed.command, workspacePath, state, parsed.port, parsed.allowMissingSsh, parsed.devcontainerSubpath);
+  await handleUpLike(
+    parsed.command,
+    workspacePath,
+    state,
+    parsed.port,
+    parsed.allowMissingSsh,
+    parsed.devcontainerSubpath,
+    parsed.sshPublicKeyPath,
+  );
 }
 
 async function handleUpLike(
@@ -106,8 +116,10 @@ async function handleUpLike(
   explicitPort: number | undefined,
   allowMissingSsh: boolean,
   devcontainerSubpath: string | undefined,
+  sshPublicKeyPath?: string,
 ): Promise<void> {
   const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
+  const resolvedSshPublicKey = await resolveSshPublicKey({ overridePath: sshPublicKeyPath });
   const workspaceHash = hashWorkspacePath(workspacePath);
   const labels = getManagedLabels(workspaceHash);
   const existingContainerIds = await listManagedContainers(labels);
@@ -154,6 +166,9 @@ async function handleUpLike(
   }
   if (preparedKnownHosts.warning) {
     console.warn(`Warning: ${preparedKnownHosts.warning}`);
+  }
+  if (resolvedSshPublicKey.warning) {
+    console.warn(`Warning: ${resolvedSshPublicKey.warning}`);
   }
   if (process.platform === "linux" && environment.dockerRootless) {
     console.warn(
@@ -235,6 +250,16 @@ async function handleUpLike(
     successMessage: "SSH server is ready",
     action: () => startRunner(upResult.containerId, port, remoteWorkspaceFolder),
   });
+  if (resolvedSshPublicKey.publicKey) {
+    const sshUser = runnerCredentials.user ?? upResult.remoteUser;
+    if (!sshUser) {
+      throw new UserError(
+        "SSH public key auth was requested, but devbox could not determine which container user should receive authorized_keys.",
+      );
+    }
+    console.log("Installing SSH public key for key-based login...");
+    await configureAuthorizedKeys(upResult.containerId, sshUser, resolvedSshPublicKey.publicKey);
+  }
   await writeFile(
     runnerMetadataPath,
     serializeRunnerMetadata(
@@ -242,6 +267,8 @@ async function handleUpLike(
         sshUser: runnerCredentials.user,
         sshPort: runnerCredentials.sshPort ?? port,
         permitRootLogin: runnerCredentials.permitRootLogin,
+        publicKeyConfigured: resolvedSshPublicKey.publicKey !== null,
+        publicKeySource: resolvedSshPublicKey.sourcePath,
       }),
     ),
     "utf8",

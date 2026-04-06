@@ -37,6 +37,8 @@ export interface DevboxStatus {
   sshUser: string | null;
   sshPort: number | null;
   permitRootLogin: boolean | null;
+  publicKeyConfigured: boolean | null;
+  publicKeySource: string | null;
   remoteUser: string | null;
   labels: Record<string, string>;
   publishedPorts: Record<string, DevboxStatusPortBinding[]>;
@@ -126,6 +128,8 @@ export async function getDevboxStatus(
     : getPublishedHostPortForPort(publishedPorts, configuredSshPort) ?? configuredSshPort;
   const sshUser = sshMetadataFile.value?.sshUser ?? credentialFile.value?.user ?? null;
   const permitRootLogin = sshMetadataFile.value?.permitRootLogin ?? credentialFile.value?.permitRootLogin ?? null;
+  const publicKeyConfigured = sshMetadataFile.value?.publicKeyConfigured ?? null;
+  const publicKeySource = sshMetadataFile.value?.publicKeySource ?? null;
   const password = credentialFile.value?.password ?? null;
   appendMissingDataWarnings({
     warnings,
@@ -137,6 +141,8 @@ export async function getDevboxStatus(
     sshUser,
     sshPort: configuredSshPort,
     permitRootLogin,
+    publicKeyConfigured,
+    publicKeySource,
     remoteUser: configHints.remoteUser,
   });
 
@@ -156,6 +162,8 @@ export async function getDevboxStatus(
     sshUser,
     sshPort: configuredSshPort,
     permitRootLogin,
+    publicKeyConfigured,
+    publicKeySource,
     remoteUser: configHints.remoteUser,
     labels,
     publishedPorts,
@@ -287,6 +295,8 @@ function appendMissingDataWarnings(input: {
   sshUser: string | null;
   sshPort: number | null;
   permitRootLogin: boolean | null;
+  publicKeyConfigured: boolean | null;
+  publicKeySource: string | null;
   remoteUser: string | null;
 }): void {
   if (!input.credentialFile.exists) {
@@ -320,6 +330,12 @@ function appendMissingDataWarnings(input: {
         `Devbox SSH metadata file is missing ${formatFieldList(unavailableFields)}: ${input.sshMetadataPath}.`,
       );
     }
+  }
+
+  if (input.publicKeyConfigured === null) {
+    input.warnings.push(
+      `SSH public key status is unavailable because the devbox SSH metadata does not record it${input.publicKeySource === null ? "." : ":"} ${input.sshMetadataPath}.`,
+    );
   }
 
   if (input.remoteUser === null) {
