@@ -42,9 +42,9 @@
     "pack:dry-run": "npm pack --dry-run"
   },
   "dependencies": {
-    "jsonc-parser": "^3.3.1"
+    "jsonc-parser": "3.3.1"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "1.3.10"
   }
 }
