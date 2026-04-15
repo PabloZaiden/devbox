@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { access, appendFile, mkdir, readFile, realpath } from "node:fs/promises";
+import { access, appendFile, lstat, mkdir, readFile, readlink, realpath, rm, symlink } from "node:fs/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
 import os from "node:os";
@@ -76,6 +76,12 @@ export interface PortAvailability {
   available: boolean;
   pids: string[];
 }
+
+export type ManagedContainerSshMountCompatibility =
+  | "not-applicable"
+  | "unchanged"
+  | "created-symlink"
+  | "updated-symlink";
 
 export function isExecutableAvailable(command: string): boolean {
   return findExecutableOnPath(command) !== null;
@@ -602,6 +608,61 @@ export async function removeContainers(containerIds: string[]): Promise<void> {
     stdoutMode: "raw",
     stderrMode: "raw",
   });
+}
+
+export async function ensureManagedContainerSshMountCompatibility(
+  container: DockerInspect,
+  sshAuthSockSource: string | null,
+): Promise<ManagedContainerSshMountCompatibility> {
+  const trimmedSshAuthSockSource = sshAuthSockSource?.trim() || null;
+  if (!trimmedSshAuthSockSource || trimmedSshAuthSockSource === DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE) {
+    return "not-applicable";
+  }
+
+  const containerSshAuthSock = getContainerSshAuthSockPath(trimmedSshAuthSockSource);
+  if (!containerSshAuthSock) {
+    return "not-applicable";
+  }
+
+  const mountedSource = getContainerBindMountSource(container, containerSshAuthSock);
+  if (!mountedSource) {
+    return "unchanged";
+  }
+
+  const resolvedMountedSource = path.resolve(mountedSource);
+  const resolvedCurrentSshAuthSock = path.resolve(trimmedSshAuthSockSource);
+  if (resolvedMountedSource === resolvedCurrentSshAuthSock) {
+    return "unchanged";
+  }
+
+  let mountedSourceStat: Awaited<ReturnType<typeof lstat>> | null = null;
+  try {
+    mountedSourceStat = await lstat(resolvedMountedSource);
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      throw error;
+    }
+  }
+
+  if (!mountedSourceStat) {
+    await mkdir(path.dirname(resolvedMountedSource), { recursive: true });
+    await symlink(resolvedCurrentSshAuthSock, resolvedMountedSource);
+    return "created-symlink";
+  }
+
+  if (!mountedSourceStat.isSymbolicLink()) {
+    return "unchanged";
+  }
+
+  const existingTarget = await readlink(resolvedMountedSource);
+  const resolvedExistingTarget = path.resolve(path.dirname(resolvedMountedSource), existingTarget);
+  if (resolvedExistingTarget === resolvedCurrentSshAuthSock) {
+    return "unchanged";
+  }
+
+  await rm(resolvedMountedSource);
+  await symlink(resolvedCurrentSshAuthSock, resolvedMountedSource);
+  return "updated-symlink";
 }
 
 export async function devcontainerUp(input: {
@@ -1481,4 +1542,15 @@ export function labelsForWorkspaceHash(workspaceHash: string): Record<string, st
     [MANAGED_LABEL_KEY]: "true",
     [WORKSPACE_LABEL_KEY]: workspaceHash,
   };
+}
+
+function getContainerBindMountSource(container: DockerInspect, destination: string): string | null {
+  const matchingMount = (container.Mounts ?? []).find(
+    (mount) => mount?.Type === "bind" && typeof mount.Source === "string" && mount.Destination === destination,
+  );
+  return matchingMount?.Source ? path.resolve(matchingMount.Source) : null;
+}
+
+function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

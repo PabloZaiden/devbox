@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -29,6 +29,7 @@ import {
   resolveSshPublicKey,
   resolveShellContainerId,
   resolveGhCliToken,
+  ensureManagedContainerSshMountCompatibility,
   requiresSshAuthSockPermissionFix,
   resolveSshAuthSockSource,
 } from "../src/runtime";
@@ -107,6 +108,107 @@ describe("resolveSshAuthSockSource", () => {
     ).toThrow(
       "No usable SSH agent socket was found. Set SSH_AUTH_SOCK or use Docker Desktop host services. Pass --allow-missing-ssh to continue without SSH agent sharing.",
     );
+  });
+});
+
+describe("ensureManagedContainerSshMountCompatibility", () => {
+  test("creates a compatibility symlink when the previous ssh agent mount source is missing", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const currentSocketPath = path.join(tempDir, "current", "agent.sock");
+    const previousSocketPath = path.join(tempDir, "old", "agent.sock");
+    await mkdir(path.dirname(currentSocketPath), { recursive: true });
+    await writeFile(currentSocketPath, "socket");
+
+    const outcome = await ensureManagedContainerSshMountCompatibility(
+      {
+        Id: "container-1",
+        Mounts: [
+          {
+            Type: "bind",
+            Source: previousSocketPath,
+            Destination: "/run/devbox-ssh-auth.sock",
+          },
+        ],
+      },
+      currentSocketPath,
+    );
+
+    expect(outcome).toBe("created-symlink");
+    expect(await readlink(previousSocketPath)).toBe(currentSocketPath);
+  });
+
+  test("updates an existing stale compatibility symlink to the current ssh agent socket", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const currentSocketPath = path.join(tempDir, "current", "agent.sock");
+    const staleSocketPath = path.join(tempDir, "stale", "agent.sock");
+    const compatibilityPath = path.join(tempDir, "old", "agent.sock");
+    await mkdir(path.dirname(currentSocketPath), { recursive: true });
+    await mkdir(path.dirname(staleSocketPath), { recursive: true });
+    await mkdir(path.dirname(compatibilityPath), { recursive: true });
+    await writeFile(currentSocketPath, "current");
+    await writeFile(staleSocketPath, "stale");
+    await symlink(staleSocketPath, compatibilityPath);
+
+    const outcome = await ensureManagedContainerSshMountCompatibility(
+      {
+        Id: "container-1",
+        Mounts: [
+          {
+            Type: "bind",
+            Source: compatibilityPath,
+            Destination: "/run/devbox-ssh-auth.sock",
+          },
+        ],
+      },
+      currentSocketPath,
+    );
+
+    expect(outcome).toBe("updated-symlink");
+    expect(await readlink(compatibilityPath)).toBe(currentSocketPath);
+  });
+
+  test("does nothing when the existing mount already points at the current host ssh agent socket", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const currentSocketPath = path.join(tempDir, "current", "agent.sock");
+    await mkdir(path.dirname(currentSocketPath), { recursive: true });
+    await writeFile(currentSocketPath, "current");
+
+    await expect(
+      ensureManagedContainerSshMountCompatibility(
+        {
+          Id: "container-1",
+          Mounts: [
+            {
+              Type: "bind",
+              Source: currentSocketPath,
+              Destination: "/run/devbox-ssh-auth.sock",
+            },
+          ],
+        },
+        currentSocketPath,
+      ),
+    ).resolves.toBe("unchanged");
+  });
+
+  test("does nothing when ssh agent sharing is disabled or handled by Docker Desktop", async () => {
+    const container: DockerInspect = {
+      Id: "container-1",
+      Mounts: [
+        {
+          Type: "bind",
+          Source: "/tmp/old.sock",
+          Destination: "/run/devbox-ssh-auth.sock",
+        },
+      ],
+    };
+
+    await expect(ensureManagedContainerSshMountCompatibility(container, null)).resolves.toBe("not-applicable");
+    await expect(
+      ensureManagedContainerSshMountCompatibility(container, DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE),
+    ).resolves.toBe("not-applicable");
   });
 });
 
