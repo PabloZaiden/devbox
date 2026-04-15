@@ -35,6 +35,7 @@ import {
   configureAuthorizedKeys,
   copyKnownHosts,
   devcontainerUp,
+  ensureManagedContainerSshMountCompatibility,
   ensureSshAuthSockAccessible,
   ensureGeneratedConfigIgnored,
   ensureHostEnvironment,
@@ -205,6 +206,15 @@ async function handleUpLike(
     (container) => container.State?.Running && getPublishedHostPorts(container).includes(port),
   );
   await assertPortAvailable(port, allowCurrentPort);
+
+  const sshMountCompatibility = existingInspects[0]
+    ? await ensureManagedContainerSshMountCompatibility(existingInspects[0], environment.sshAuthSock)
+    : "not-applicable";
+  if (sshMountCompatibility === "created-symlink") {
+    console.log("Recreated the missing host SSH agent mount source as a symlink to the current SSH_AUTH_SOCK.");
+  } else if (sshMountCompatibility === "updated-symlink") {
+    console.log("Updated the stale host SSH agent mount symlink to point at the current SSH_AUTH_SOCK.");
+  }
 
   console.log(`Starting workspace on port ${port}...`);
   const upResult = await runStepWithHeartbeat({
