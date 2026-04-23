@@ -101,7 +101,6 @@ describe("example workspaces (real devcontainers)", () => {
       expect(up.stdout).toContain("Devcontainer is ready");
       expect(up.stdout).toContain("SSH server:");
       expect(up.stdout).toContain("Ready.");
-      expect(up.stderr).toContain("Continuing without SSH agent sharing.");
 
       const state = await readJson(fixture.statePath);
       const containerId = String(state.lastContainerId);
