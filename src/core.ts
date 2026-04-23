@@ -476,28 +476,14 @@ export async function loadWorkspaceState(workspacePath: string): Promise<Workspa
   }
 
   const raw = await readFile(statePath, "utf8");
-  const parsed = JSON.parse(raw) as Partial<WorkspaceState>;
+  const parsed = JSON.parse(raw) as unknown;
+  const migrated = migrateWorkspaceState(parsed);
 
-  if (
-    parsed.version !== STATE_VERSION ||
-    typeof parsed.workspacePath !== "string" ||
-    typeof parsed.workspaceHash !== "string" ||
-    typeof parsed.port !== "number" ||
-    (parsed.configSource !== "repo" && parsed.configSource !== "template") ||
-    typeof parsed.generatedConfigPath !== "string" ||
-    (parsed.sourceConfigPath !== null && typeof parsed.sourceConfigPath !== "string") ||
-    typeof parsed.userDataDir !== "string" ||
-    !parsed.labels ||
-    typeof parsed.labels !== "object"
-  ) {
+  if (!migrated) {
     throw new UserError(`State file is invalid: ${statePath}`);
   }
 
-  if (parsed.template !== null && parsed.template !== undefined) {
-    assertValidTemplateState(parsed.template);
-  }
-
-  return parsed as WorkspaceState;
+  return migrated;
 }
 
 export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
@@ -1047,6 +1033,77 @@ function assertValidTemplateState(value: unknown): asserts value is WorkspaceTem
   ) {
     throw new UserError("State file template entry is invalid.");
   }
+}
+
+function migrateWorkspaceState(value: unknown): WorkspaceState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.workspacePath !== "string" ||
+    typeof record.workspaceHash !== "string" ||
+    typeof record.port !== "number" ||
+    typeof record.generatedConfigPath !== "string" ||
+    typeof record.userDataDir !== "string" ||
+    !record.labels ||
+    typeof record.labels !== "object" ||
+    Array.isArray(record.labels)
+  ) {
+    return null;
+  }
+
+  const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString();
+  const lastContainerId = typeof record.lastContainerId === "string" ? record.lastContainerId : undefined;
+
+  if (record.version === 1) {
+    if (typeof record.sourceConfigPath !== "string") {
+      return null;
+    }
+
+    return {
+      version: STATE_VERSION,
+      workspacePath: record.workspacePath,
+      workspaceHash: record.workspaceHash,
+      port: record.port,
+      configSource: "repo",
+      sourceConfigPath: record.sourceConfigPath,
+      generatedConfigPath: record.generatedConfigPath,
+      labels: record.labels as Record<string, string>,
+      userDataDir: record.userDataDir,
+      template: null,
+      lastContainerId,
+      updatedAt,
+    };
+  }
+
+  if (
+    record.version !== STATE_VERSION ||
+    (record.configSource !== "repo" && record.configSource !== "template") ||
+    (record.sourceConfigPath !== null && typeof record.sourceConfigPath !== "string")
+  ) {
+    return null;
+  }
+
+  if (record.template !== null && record.template !== undefined) {
+    assertValidTemplateState(record.template);
+  }
+
+  return {
+    version: STATE_VERSION,
+    workspacePath: record.workspacePath,
+    workspaceHash: record.workspaceHash,
+    port: record.port,
+    configSource: record.configSource,
+    sourceConfigPath: record.sourceConfigPath,
+    generatedConfigPath: record.generatedConfigPath,
+    labels: record.labels as Record<string, string>,
+    userDataDir: record.userDataDir,
+    template: (record.template as WorkspaceTemplateState | null | undefined) ?? null,
+    lastContainerId,
+    updatedAt,
+  };
 }
 
 function cloneTemplateState(template: WorkspaceTemplateState): WorkspaceTemplateState {
