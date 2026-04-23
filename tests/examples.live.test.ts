@@ -149,7 +149,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
       expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
-      expect(existsSync(fixture.statePath)).toBe(false);
+      expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 8 * 60_000 },
   );
@@ -266,7 +266,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
       expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
-      expect(existsSync(fixture.statePath)).toBe(false);
+      expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 12 * 60_000 },
   );
