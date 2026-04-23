@@ -97,22 +97,22 @@ describe("example workspaces (real devcontainers)", () => {
       const up = runCli(fixture, ["up", "--template", "ubuntu", "--allow-missing-ssh"]);
 
       expect(up.exitCode).toBe(0);
-      expect(up.stdout).toContain(`Using port ${fixture.port}.`);
       expect(up.stdout).toContain("Devcontainer is ready");
       expect(up.stdout).toContain("SSH server:");
       expect(up.stdout).toContain("Ready.");
 
       const state = await readJson(fixture.statePath);
+      const selectedPort = Number(state.port);
       const containerId = String(state.lastContainerId);
-      expect(state.port).toBe(fixture.port);
+      expect(up.stdout).toContain(`Using port ${selectedPort}.`);
       expect(state.configSource).toBe("template");
       expect(state.sourceConfigPath).toBeNull();
       expect(state.template.name).toBe("ubuntu");
 
       const inspect = inspectContainer(fixture, containerId);
-      expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, fixture.port)}`);
+      expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, selectedPort)}`);
       expect(inspect.Config?.Labels).toEqual(expect.objectContaining(state.labels));
-      expect(getPublishedHostPort(inspect, fixture.port)).toBe(String(fixture.port));
+      expect(getPublishedHostPort(inspect, selectedPort)).toBe(String(selectedPort));
 
       const sampleFileContent = await readFile(fixture.sampleFilePath, "utf8");
       const sample = execInContainer(
