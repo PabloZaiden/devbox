@@ -48,6 +48,11 @@ export interface DevboxStatus {
   credentialPath: string;
   hasSshMetadataFile: boolean;
   sshMetadataPath: string;
+  configSource: "repo" | "template" | null;
+  templateName: string | null;
+  templateDescription: string | null;
+  templatePinnedReference: string | null;
+  templateRuntimeVersion: string | null;
   sourceConfigPath: string | null;
   generatedConfigPath: string | null;
   userDataDir: string | null;
@@ -110,12 +115,19 @@ export async function getDevboxStatus(
   const credentialFile = await readRunnerCredentialsFile(credentialPath, readFile);
   const sshMetadataPath = path.join(input.workspacePath, DEVBOX_SSH_METADATA_FILENAME);
   const sshMetadataFile = await readRunnerMetadataFile(sshMetadataPath, readFile, warnings);
-  const configHints = await readConfigHints({
-    readFile,
-    sourceConfigPath: state?.sourceConfigPath ?? null,
-    warnings,
-    workspacePath: input.workspacePath,
-  });
+  const configHints = state?.template
+    ? readConfigHintsFromConfig({
+        config: state.template.config,
+        sourceConfigPath: state.sourceConfigPath,
+        workspacePath: input.workspacePath,
+      })
+    : await readConfigHints({
+        readFile,
+        sourceConfigPath: state?.sourceConfigPath ?? null,
+        generatedConfigPath: state?.generatedConfigPath ?? null,
+        warnings,
+        workspacePath: input.workspacePath,
+      });
   const publishedPorts = getPublishedPorts(primaryContainer);
   const configuredSshPort =
     state?.port
@@ -173,6 +185,11 @@ export async function getDevboxStatus(
     credentialPath,
     hasSshMetadataFile: sshMetadataFile.exists,
     sshMetadataPath,
+    configSource: state?.configSource ?? null,
+    templateName: state?.template?.name ?? null,
+    templateDescription: state?.template?.description ?? null,
+    templatePinnedReference: state?.template?.pinnedReference ?? null,
+    templateRuntimeVersion: state?.template?.runtimeVersion ?? null,
     sourceConfigPath: state?.sourceConfigPath ?? configHints.sourceConfigPath,
     generatedConfigPath: state?.generatedConfigPath ?? null,
     userDataDir: state?.userDataDir ?? null,
@@ -227,12 +244,14 @@ async function readRunnerMetadataFile(
 async function readConfigHints(input: {
   workspacePath: string;
   sourceConfigPath: string | null;
+  generatedConfigPath: string | null;
   readFile: (filePath: string) => Promise<string>;
   warnings: string[];
 }): Promise<ConfigHints> {
   const defaultWorkdir = getDefaultRemoteWorkspaceFolder(input.workspacePath);
   const candidates = [
     input.sourceConfigPath,
+    input.generatedConfigPath,
     path.join(input.workspacePath, ".devcontainer", "devcontainer.json"),
     path.join(input.workspacePath, ".devcontainer.json"),
   ].filter((candidate, index, values): candidate is string => Boolean(candidate) && values.indexOf(candidate) === index);
@@ -259,22 +278,11 @@ async function readConfigHints(input: {
       continue;
     }
 
-    const config = parsed as Record<string, unknown>;
-    const configuredWorkdir = typeof config.workspaceFolder === "string" && config.workspaceFolder.trim().length > 0
-      ? config.workspaceFolder
-      : null;
-    const remoteUser = typeof config.remoteUser === "string" && config.remoteUser.trim().length > 0
-      ? config.remoteUser
-      : typeof config.containerUser === "string" && config.containerUser.trim().length > 0
-        ? config.containerUser
-        : null;
-
-    return {
-      remoteUser,
-      sourceConfigPath: candidate,
-      workdir: configuredWorkdir ?? defaultWorkdir,
-      workdirSource: configuredWorkdir ? "config" : "default",
-    };
+    return readConfigHintsFromConfig({
+      config: parsed as Record<string, unknown>,
+      sourceConfigPath: candidate === input.generatedConfigPath ? input.sourceConfigPath : candidate,
+      workspacePath: input.workspacePath,
+    });
   }
 
   return {
@@ -282,6 +290,29 @@ async function readConfigHints(input: {
     sourceConfigPath: input.sourceConfigPath,
     workdir: defaultWorkdir,
     workdirSource: "default",
+  };
+}
+
+function readConfigHintsFromConfig(input: {
+  workspacePath: string;
+  sourceConfigPath: string | null;
+  config: Record<string, unknown>;
+}): ConfigHints {
+  const defaultWorkdir = getDefaultRemoteWorkspaceFolder(input.workspacePath);
+  const configuredWorkdir = typeof input.config.workspaceFolder === "string" && input.config.workspaceFolder.trim().length > 0
+    ? input.config.workspaceFolder
+    : null;
+  const remoteUser = typeof input.config.remoteUser === "string" && input.config.remoteUser.trim().length > 0
+    ? input.config.remoteUser
+    : typeof input.config.containerUser === "string" && input.config.containerUser.trim().length > 0
+      ? input.config.containerUser
+      : null;
+
+  return {
+    remoteUser,
+    sourceConfigPath: input.sourceConfigPath,
+    workdir: configuredWorkdir ?? defaultWorkdir,
+    workdirSource: configuredWorkdir ? "config" : "default",
   };
 }
 

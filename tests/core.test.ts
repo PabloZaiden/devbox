@@ -63,6 +63,10 @@ describe("parseArgs", () => {
     expect(parseArgs(["arise"])).toEqual({ command: "arise", allowMissingSsh: false });
   });
 
+  test("supports the templates subcommand", () => {
+    expect(parseArgs(["templates"])).toEqual({ command: "templates", allowMissingSsh: false });
+  });
+
   test("supports selecting a devcontainer subpath", () => {
     expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
       command: "up",
@@ -87,6 +91,14 @@ describe("parseArgs", () => {
       command: "rebuild",
       allowMissingSsh: false,
       sshPublicKeyPath: "./keys/devbox.pub",
+    });
+  });
+
+  test("supports selecting a built-in template for up", () => {
+    expect(parseArgs(["up", "--template", "python"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      templateName: "python",
     });
   });
 
@@ -140,6 +152,16 @@ describe("parseArgs", () => {
       "The arise command does not accept --ssh-public-key.",
     );
   });
+
+  test("rebuild rejects --template", () => {
+    expect(() => parseArgs(["rebuild", "--template", "go"])).toThrow("The rebuild command does not accept --template.");
+  });
+
+  test("rejects combining --template with --devcontainer-subpath", () => {
+    expect(() => parseArgs(["up", "--template", "python", "--devcontainer-subpath", "services/api"])).toThrow(
+      "--template cannot be combined with --devcontainer-subpath.",
+    );
+  });
 });
 
 describe("helpText", () => {
@@ -164,6 +186,7 @@ describe("helpText", () => {
     expect(text).toContain("rebuild");
     expect(text).toContain("shell");
     expect(text).toContain("status");
+    expect(text).toContain("templates");
     expect(text).toContain("arise");
     expect(text).toContain("down");
     expect(text).toContain("help");
@@ -174,14 +197,16 @@ describe("resolvePort", () => {
   test("reuses stored port", () => {
     expect(
       resolvePort("up", undefined, {
-        version: 1,
+        version: 2,
         workspacePath: "/tmp/ws",
         workspaceHash: "hash",
         port: 5003,
+        configSource: "repo",
         sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
         generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
         labels: { managed: "true" },
         userDataDir: "/tmp/state",
+        template: null,
         updatedAt: new Date().toISOString(),
       }),
     ).toBe(5003);
@@ -190,14 +215,16 @@ describe("resolvePort", () => {
 
 describe("resolveUpPortPreference", () => {
   const state = {
-    version: 1,
+    version: 2,
     workspacePath: "/tmp/ws",
     workspaceHash: "hash",
     port: 5003,
+    configSource: "repo",
     sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
     generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
     labels: { managed: "true" },
     userDataDir: "/tmp/state",
+    template: null,
     updatedAt: new Date().toISOString(),
   };
 
