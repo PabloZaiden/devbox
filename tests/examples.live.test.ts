@@ -91,6 +91,47 @@ afterEach(async () => {
 
 describe("example workspaces (real devcontainers)", () => {
   liveTest(
+    "template workspace starts from the ubuntu template without a repo devcontainer",
+    async () => {
+      const fixture = await setupLiveFixture("template-workspace");
+      const up = runCli(fixture, ["up", "--template", "ubuntu", "--allow-missing-ssh"]);
+
+      expect(up.exitCode).toBe(0);
+      expect(up.stdout).toContain(`Using port ${fixture.port}.`);
+      expect(up.stdout).toContain("Devcontainer is ready");
+      expect(up.stdout).toContain("SSH server:");
+      expect(up.stdout).toContain("Ready.");
+      expect(up.stderr).toContain("Continuing without SSH agent sharing.");
+
+      const state = await readJson(fixture.statePath);
+      const containerId = String(state.lastContainerId);
+      expect(state.port).toBe(fixture.port);
+      expect(state.configSource).toBe("template");
+      expect(state.sourceConfigPath).toBeNull();
+      expect(state.template.name).toBe("ubuntu");
+
+      const inspect = inspectContainer(fixture, containerId);
+      expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, fixture.port)}`);
+      expect(inspect.Config?.Labels).toEqual(expect.objectContaining(state.labels));
+      expect(getPublishedHostPort(inspect, fixture.port)).toBe(String(fixture.port));
+
+      const sampleFileContent = await readFile(fixture.sampleFilePath, "utf8");
+      const sample = execInContainer(
+        fixture,
+        containerId,
+        `cat ${quoteShell(path.posix.join(fixture.remoteWorkspaceFolder, "sample-file.txt"))}`,
+      );
+      expect(sample.stdout).toBe(sampleFileContent);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+      expect(down.stdout).toContain("Removed 1 managed container(s).");
+      expect(await listManagedContainerIds(fixture)).toEqual([]);
+    },
+    { timeout: 8 * 60_000 },
+  );
+
+  liveTest(
     "smoke workspace exercises the real docker-in-docker devcontainer path",
     async () => {
       const fixture = await setupLiveFixture("smoke-workspace");

@@ -14,9 +14,11 @@ import {
   getContainerSshAuthSockPath,
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
+  getLegacyTemplateGeneratedConfigPath,
   getManagedContainerName,
   getManagedPortFromContainerName,
   getManagedLabels,
+  getTemplateGeneratedConfigPath,
   helpText,
   parseArgs,
   prepareKnownHostsMount,
@@ -421,7 +423,7 @@ describe("resolveWorkspaceConfig", () => {
       port: 5001,
       configSource: "template",
       sourceConfigPath: null,
-      generatedConfigPath: path.join(tempDir, ".devbox", "generated-template-devcontainer.json"),
+      generatedConfigPath: getTemplateGeneratedConfigPath(tempDir),
       labels: {},
       userDataDir: path.join(tempDir, ".devbox", "user-data"),
       template,
@@ -445,6 +447,39 @@ describe("resolveWorkspaceConfig", () => {
     expect(rebuildStyleResolution.generatedConfigPath).toBe(state.generatedConfigPath);
     expect(rebuildStyleResolution.template?.name).toBe("python");
     expect(rebuildStyleResolution.config.image).toBe("mcr.microsoft.com/devcontainers/python:3.0.7-3.14-bookworm");
+  });
+
+  test("normalizes legacy template generated config paths from saved state", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    const template = getTemplateDefinition("ubuntu");
+    expect(template).not.toBeNull();
+    if (!template) {
+      throw new Error("Expected the built-in ubuntu template to exist.");
+    }
+
+    const state: WorkspaceState = {
+      version: STATE_VERSION,
+      workspacePath: tempDir,
+      workspaceHash: "workspace-hash",
+      port: 5001,
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: getLegacyTemplateGeneratedConfigPath(tempDir),
+      labels: {},
+      userDataDir: path.join(tempDir, ".devbox", "user-data"),
+      template,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const resolution = await resolveWorkspaceConfig({
+      workspacePath: tempDir,
+      state,
+      preferStateSource: true,
+    });
+
+    expect(resolution.generatedConfigPath).toBe(getTemplateGeneratedConfigPath(tempDir));
+    expect(resolution.legacyGeneratedConfigPath).toBe(getLegacyTemplateGeneratedConfigPath(tempDir));
   });
 });
 
