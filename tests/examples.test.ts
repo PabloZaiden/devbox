@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { KNOWN_HOSTS_SNAPSHOT_FILENAME, SSH_AUTH_SOCK_TARGET } from "../src/constants";
-import { hashWorkspacePath } from "../src/core";
+import { getGeneratedConfigPath, hashWorkspacePath } from "../src/core";
 import { buildInteractiveShellScript } from "../src/runtime";
 
 const repoRoot = process.cwd();
@@ -19,7 +19,6 @@ interface ExampleFixtureOptions {
   };
   knownHosts?: string;
   sshAuthSock?: boolean;
-  withoutDevcontainer?: boolean;
 }
 
 interface ExampleFixture {
@@ -529,38 +528,36 @@ describe("example workspaces (simulated host tools)", () => {
   });
 
   test("template-backed workspace lists templates, starts without a repo devcontainer, and rebuilds from saved state", async () => {
-    const fixture = await setupExampleFixture("smoke-workspace", {
-      withoutDevcontainer: true,
-    });
+    const fixture = await setupExampleFixture("template-workspace");
 
     const templates = runCli(fixture, ["templates"]);
     expect(templates.exitCode).toBe(0);
     const templateList = JSON.parse(templates.stdout);
+    expect(templateList.some((entry: { name: string }) => entry.name === "ubuntu")).toBe(true);
     expect(templateList.some((entry: { name: string }) => entry.name === "bun")).toBe(true);
-    expect(templateList.some((entry: { name: string }) => entry.name === "rust")).toBe(true);
 
-    const up = runCli(fixture, ["up", "--template", "bun", "--allow-missing-ssh"]);
+    const up = runCli(fixture, ["up", "--template", "ubuntu", "--allow-missing-ssh"]);
     expect(up.exitCode).toBe(0);
     expect(up.stdout).toContain("Using port 5001.");
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
-    expect(generatedConfig.image).toBe("oven/bun:1.3.13");
+    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
     expect(generatedConfig.postCreateCommand).toBeUndefined();
 
     const state = await readJson(fixture.statePath);
     expect(state.configSource).toBe("template");
     expect(state.sourceConfigPath).toBeNull();
-    expect(state.template.name).toBe("bun");
-    expect(state.template.image).toBe("oven/bun:1.3.13");
-    expect(state.template.pinnedReference).toBe("oven/bun:1.3.13");
-    expect(state.template.runtimeVersion).toBe("Bun 1.3.13");
+    expect(state.template.name).toBe("ubuntu");
+    expect(state.template.image).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
+    expect(state.template.pinnedReference).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
+    expect(state.template.runtimeVersion).toBe("Ubuntu 24.04");
 
     const statusWhileRunning = runCli(fixture, ["status"]);
     expect(statusWhileRunning.exitCode).toBe(0);
     const runningStatus = JSON.parse(statusWhileRunning.stdout);
     expect(runningStatus.configSource).toBe("template");
-    expect(runningStatus.templateName).toBe("bun");
+    expect(runningStatus.templateName).toBe("ubuntu");
 
     const rebuild = runCli(fixture, ["rebuild", "--allow-missing-ssh"]);
     expect(rebuild.exitCode).toBe(0);
@@ -581,7 +578,7 @@ describe("example workspaces (simulated host tools)", () => {
     const stoppedStatus = JSON.parse(statusAfterDown.stdout);
     expect(stoppedStatus.hasStateFile).toBe(true);
     expect(stoppedStatus.configSource).toBe("template");
-    expect(stoppedStatus.templateName).toBe("bun");
+    expect(stoppedStatus.templateName).toBe("ubuntu");
   });
 });
 
@@ -591,10 +588,6 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
 
   const workspaceCopyPath = path.join(tempDir, exampleName);
   await cp(path.join(repoRoot, "examples", exampleName), workspaceCopyPath, { recursive: true });
-  if (options.withoutDevcontainer) {
-    await rm(path.join(workspaceCopyPath, ".devcontainer"), { recursive: true, force: true });
-    await rm(path.join(workspaceCopyPath, ".devcontainer.json"), { force: true });
-  }
   await runHostCommand(["git", "init", workspaceCopyPath]);
 
   if (options.gitIdentity) {
@@ -632,19 +625,28 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
   env.XDG_STATE_HOME = xdgStateHome;
 
   const stateDir = getStateDir(homeDir, workspacePath, xdgStateHome);
+  const sourceConfigPath = resolveExampleSourceConfigPath(workspacePath);
   return {
     commandLogPath,
     env,
-    generatedConfigPath: options.withoutDevcontainer
-      ? path.join(stateDir, "template.devcontainer.json")
-      : path.join(workspacePath, ".devcontainer", ".devcontainer.json"),
+    generatedConfigPath: sourceConfigPath ? getGeneratedConfigPath(sourceConfigPath) : path.join(stateDir, ".devcontainer.json"),
     homeDir,
-    sourceConfigPath: options.withoutDevcontainer ? null : path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+    sourceConfigPath,
     sshAuthSockPath,
     statePath: path.join(stateDir, "state.json"),
     userDataDir: path.join(stateDir, "user-data"),
     workspacePath,
   };
+}
+
+function resolveExampleSourceConfigPath(workspacePath: string): string | null {
+  const nestedConfigPath = path.join(workspacePath, ".devcontainer", "devcontainer.json");
+  if (existsSync(nestedConfigPath)) {
+    return nestedConfigPath;
+  }
+
+  const rootConfigPath = path.join(workspacePath, ".devcontainer.json");
+  return existsSync(rootConfigPath) ? rootConfigPath : null;
 }
 
 async function createFakeHostToolchain(fakeHostDir: string): Promise<string> {

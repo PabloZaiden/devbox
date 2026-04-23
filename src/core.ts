@@ -422,7 +422,23 @@ export function getWorkspaceUserDataDir(workspacePath: string): string {
 }
 
 export function getTemplateGeneratedConfigPath(workspacePath: string): string {
+  return path.join(getWorkspaceStateDir(workspacePath), ".devcontainer.json");
+}
+
+export function getLegacyTemplateGeneratedConfigPath(workspacePath: string): string {
   return path.join(getWorkspaceStateDir(workspacePath), "template.devcontainer.json");
+}
+
+function resolveTemplateGeneratedConfigPath(workspacePath: string, generatedConfigPath?: string | null): string {
+  if (!generatedConfigPath) {
+    return getTemplateGeneratedConfigPath(workspacePath);
+  }
+
+  if (path.resolve(generatedConfigPath) === path.resolve(getLegacyTemplateGeneratedConfigPath(workspacePath))) {
+    return getTemplateGeneratedConfigPath(workspacePath);
+  }
+
+  return generatedConfigPath;
 }
 
 export function getDefaultRemoteWorkspaceFolder(workspacePath: string): string {
@@ -693,7 +709,7 @@ export async function resolveWorkspaceConfig(input: {
       configSource: "template",
       sourceConfigPath: null,
       generatedConfigPath: getTemplateGeneratedConfigPath(input.workspacePath),
-      legacyGeneratedConfigPath: null,
+      legacyGeneratedConfigPath: getLegacyTemplateGeneratedConfigPath(input.workspacePath),
       template,
     };
   }
@@ -715,8 +731,8 @@ export async function resolveWorkspaceConfig(input: {
       config: structuredClone(input.state.template.config),
       configSource: "template",
       sourceConfigPath: null,
-      generatedConfigPath: input.state.generatedConfigPath || getTemplateGeneratedConfigPath(input.workspacePath),
-      legacyGeneratedConfigPath: null,
+      generatedConfigPath: resolveTemplateGeneratedConfigPath(input.workspacePath, input.state.generatedConfigPath),
+      legacyGeneratedConfigPath: getLegacyTemplateGeneratedConfigPath(input.workspacePath),
       template: cloneTemplateState(input.state.template),
     };
   }
@@ -738,8 +754,8 @@ export async function resolveWorkspaceConfig(input: {
       config: structuredClone(input.state.template.config),
       configSource: "template",
       sourceConfigPath: null,
-      generatedConfigPath: input.state.generatedConfigPath || getTemplateGeneratedConfigPath(input.workspacePath),
-      legacyGeneratedConfigPath: null,
+      generatedConfigPath: resolveTemplateGeneratedConfigPath(input.workspacePath, input.state.generatedConfigPath),
+      legacyGeneratedConfigPath: getLegacyTemplateGeneratedConfigPath(input.workspacePath),
       template: cloneTemplateState(input.state.template),
     };
   }
@@ -1097,7 +1113,10 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     port: record.port,
     configSource: record.configSource,
     sourceConfigPath: record.sourceConfigPath,
-    generatedConfigPath: record.generatedConfigPath,
+    generatedConfigPath:
+      record.configSource === "template"
+        ? resolveTemplateGeneratedConfigPath(record.workspacePath, record.generatedConfigPath)
+        : record.generatedConfigPath,
     labels: record.labels as Record<string, string>,
     userDataDir: record.userDataDir,
     template: (record.template as WorkspaceTemplateState | null | undefined) ?? null,
