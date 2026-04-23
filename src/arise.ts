@@ -335,7 +335,7 @@ export async function ariseManagedWorkspaces(deps: AriseDependencies): Promise<A
 
 export function getStoredDevcontainerSubpath(
   workspacePath: string,
-  sourceConfigPath: string | undefined,
+  sourceConfigPath: string | null | undefined,
 ): string | undefined {
   if (!sourceConfigPath) {
     return undefined;

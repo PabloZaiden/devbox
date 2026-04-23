@@ -19,6 +19,7 @@ interface ExampleFixtureOptions {
   };
   knownHosts?: string;
   sshAuthSock?: boolean;
+  withoutDevcontainer?: boolean;
 }
 
 interface ExampleFixture {
@@ -26,7 +27,7 @@ interface ExampleFixture {
   env: Record<string, string>;
   generatedConfigPath: string;
   homeDir: string;
-  sourceConfigPath: string;
+  sourceConfigPath: string | null;
   sshAuthSockPath: string | null;
   statePath: string;
   userDataDir: string;
@@ -373,7 +374,7 @@ afterEach(async () => {
 describe("example workspaces (simulated host tools)", () => {
   test("smoke workspace exercises up, shell, and down through the CLI", async () => {
     const fixture = await setupExampleFixture("smoke-workspace");
-    const sourceBefore = await readFile(fixture.sourceConfigPath, "utf8");
+    const sourceBefore = await readFile(String(fixture.sourceConfigPath), "utf8");
 
     const up = runCli(fixture, ["up", "--allow-missing-ssh"]);
     expect(up.exitCode).toBe(0);
@@ -383,7 +384,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(up.stdout).toContain("Ready.");
     expect(up.stderr).toContain("Continuing without SSH agent sharing.");
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
-    expect(await readFile(fixture.sourceConfigPath, "utf8")).toBe(sourceBefore);
+    expect(await readFile(String(fixture.sourceConfigPath), "utf8")).toBe(sourceBefore);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
@@ -397,6 +398,7 @@ describe("example workspaces (simulated host tools)", () => {
     const state = await readJson(fixture.statePath);
     expect(state.port).toBe(5001);
     expect(state.sourceConfigPath).toBe(fixture.sourceConfigPath);
+    expect(state.configSource).toBe("repo");
     expect(state.generatedConfigPath).toBe(fixture.generatedConfigPath);
 
     const commandsAfterUp = await readCommandLog(fixture.commandLogPath);
@@ -443,7 +445,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(down.exitCode).toBe(0);
     expect(down.stdout).toContain("Removed 1 managed container(s).");
     expect(existsSync(fixture.generatedConfigPath)).toBe(false);
-    expect(existsSync(fixture.statePath)).toBe(false);
+    expect(existsSync(fixture.statePath)).toBe(true);
 
     const statusAfterDown = runCli(fixture, ["status"]);
     expect(statusAfterDown.exitCode).toBe(0);
@@ -451,7 +453,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stoppedStatus.running).toBe(false);
     expect(stoppedStatus.port).toBe(5001);
     expect(stoppedStatus.password).toBe("password");
-    expect(stoppedStatus.hasStateFile).toBe(false);
+    expect(stoppedStatus.hasStateFile).toBe(true);
     expect(stoppedStatus.hasCredentialFile).toBe(true);
     expect(stoppedStatus.hasSshMetadataFile).toBe(true);
   });
@@ -466,7 +468,7 @@ describe("example workspaces (simulated host tools)", () => {
       knownHosts: "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeExampleKnownHost\n",
       sshAuthSock: true,
     });
-    const sourceBefore = await readFile(fixture.sourceConfigPath, "utf8");
+    const sourceBefore = await readFile(String(fixture.sourceConfigPath), "utf8");
 
     const up = runCli(fixture, ["up"]);
     expect(up.exitCode).toBe(0);
@@ -479,7 +481,7 @@ describe("example workspaces (simulated host tools)", () => {
 
     const knownHostsSnapshotPath = path.join(fixture.userDataDir, KNOWN_HOSTS_SNAPSHOT_FILENAME);
     expect(existsSync(knownHostsSnapshotPath)).toBe(true);
-    expect(await readFile(fixture.sourceConfigPath, "utf8")).toBe(sourceBefore);
+    expect(await readFile(String(fixture.sourceConfigPath), "utf8")).toBe(sourceBefore);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.features).toEqual({
@@ -507,7 +509,7 @@ describe("example workspaces (simulated host tools)", () => {
       ),
     ).toBe(true);
 
-    const rebuild = runCli(fixture, ["rebuild"]);
+    const rebuild = runCli(fixture, ["rebuild", "--allow-missing-ssh"]);
     expect(rebuild.exitCode).toBe(0);
     expect(rebuild.stdout).toContain("Using port 5001.");
     expect(rebuild.stdout).toContain("Ready.");
@@ -520,10 +522,66 @@ describe("example workspaces (simulated host tools)", () => {
     expect(down.exitCode).toBe(0);
     expect(down.stdout).toContain("Removed 1 managed container(s).");
     expect(existsSync(fixture.generatedConfigPath)).toBe(false);
-    expect(existsSync(fixture.statePath)).toBe(false);
+    expect(existsSync(fixture.statePath)).toBe(true);
 
     const commandsAfterDown = await readCommandLog(fixture.commandLogPath);
     expect(commandsAfterDown.filter((entry) => entry.tool === "docker" && entry.args[0] === "rm").length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("template-backed workspace lists templates, starts without a repo devcontainer, and rebuilds from saved state", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace", {
+      withoutDevcontainer: true,
+    });
+
+    const templates = runCli(fixture, ["templates"]);
+    expect(templates.exitCode).toBe(0);
+    const templateList = JSON.parse(templates.stdout);
+    expect(templateList.some((entry: { name: string }) => entry.name === "bun")).toBe(true);
+    expect(templateList.some((entry: { name: string }) => entry.name === "rust")).toBe(true);
+
+    const up = runCli(fixture, ["up", "--template", "bun", "--allow-missing-ssh"]);
+    expect(up.exitCode).toBe(0);
+    expect(up.stdout).toContain("Using port 5001.");
+    expect(existsSync(fixture.generatedConfigPath)).toBe(true);
+
+    const generatedConfig = await readJson(fixture.generatedConfigPath);
+    expect(generatedConfig.image).toBe("oven/bun:1.3.13");
+    expect(generatedConfig.postCreateCommand).toBeUndefined();
+
+    const state = await readJson(fixture.statePath);
+    expect(state.configSource).toBe("template");
+    expect(state.sourceConfigPath).toBeNull();
+    expect(state.template.name).toBe("bun");
+    expect(state.template.image).toBe("oven/bun:1.3.13");
+    expect(state.template.pinnedReference).toBe("oven/bun:1.3.13");
+    expect(state.template.runtimeVersion).toBe("Bun 1.3.13");
+
+    const statusWhileRunning = runCli(fixture, ["status"]);
+    expect(statusWhileRunning.exitCode).toBe(0);
+    const runningStatus = JSON.parse(statusWhileRunning.stdout);
+    expect(runningStatus.configSource).toBe("template");
+    expect(runningStatus.templateName).toBe("bun");
+
+    const rebuild = runCli(fixture, ["rebuild", "--allow-missing-ssh"]);
+    expect(rebuild.exitCode).toBe(0);
+    expect(rebuild.stdout).toContain("Using port 5001.");
+    expect(rebuild.stdout).toContain("Ready.");
+
+    const rebuildWithTemplate = runCli(fixture, ["rebuild", "--template", "python"]);
+    expect(rebuildWithTemplate.exitCode).toBe(1);
+    expect(rebuildWithTemplate.stderr).toContain("The rebuild command does not accept --template.");
+
+    const down = runCli(fixture, ["down"]);
+    expect(down.exitCode).toBe(0);
+    expect(existsSync(fixture.generatedConfigPath)).toBe(false);
+    expect(existsSync(fixture.statePath)).toBe(true);
+
+    const statusAfterDown = runCli(fixture, ["status"]);
+    expect(statusAfterDown.exitCode).toBe(0);
+    const stoppedStatus = JSON.parse(statusAfterDown.stdout);
+    expect(stoppedStatus.hasStateFile).toBe(true);
+    expect(stoppedStatus.configSource).toBe("template");
+    expect(stoppedStatus.templateName).toBe("bun");
   });
 });
 
@@ -533,6 +591,10 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
 
   const workspaceCopyPath = path.join(tempDir, exampleName);
   await cp(path.join(repoRoot, "examples", exampleName), workspaceCopyPath, { recursive: true });
+  if (options.withoutDevcontainer) {
+    await rm(path.join(workspaceCopyPath, ".devcontainer"), { recursive: true, force: true });
+    await rm(path.join(workspaceCopyPath, ".devcontainer.json"), { force: true });
+  }
   await runHostCommand(["git", "init", workspaceCopyPath]);
 
   if (options.gitIdentity) {
@@ -573,9 +635,11 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
   return {
     commandLogPath,
     env,
-    generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devcontainer.json"),
+    generatedConfigPath: options.withoutDevcontainer
+      ? path.join(stateDir, "template.devcontainer.json")
+      : path.join(workspacePath, ".devcontainer", ".devcontainer.json"),
     homeDir,
-    sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+    sourceConfigPath: options.withoutDevcontainer ? null : path.join(workspacePath, ".devcontainer", "devcontainer.json"),
     sshAuthSockPath,
     statePath: path.join(stateDir, "state.json"),
     userDataDir: path.join(stateDir, "user-data"),

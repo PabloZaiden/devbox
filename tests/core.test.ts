@@ -1,9 +1,10 @@
+import { dirname } from "node:path";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import pkg from "../package.json";
-import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
+import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, STATE_VERSION } from "../src/constants";
 import {
   buildManagedConfig,
   describeUpPortStrategy,
@@ -19,10 +20,16 @@ import {
   helpText,
   parseArgs,
   prepareKnownHostsMount,
+  loadWorkspaceState,
+  resolveWorkspaceConfig,
   resolvePort,
   resolveUpPortPreference,
+  validateSupportedDevcontainerConfig,
+  getWorkspaceStateFile,
   type DevcontainerConfig,
+  type WorkspaceState,
 } from "../src/core";
+import { getTemplateDefinition } from "../src/templates";
 
 const tempPaths: string[] = [];
 
@@ -63,6 +70,10 @@ describe("parseArgs", () => {
     expect(parseArgs(["arise"])).toEqual({ command: "arise", allowMissingSsh: false });
   });
 
+  test("supports the templates subcommand", () => {
+    expect(parseArgs(["templates"])).toEqual({ command: "templates", allowMissingSsh: false });
+  });
+
   test("supports selecting a devcontainer subpath", () => {
     expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
       command: "up",
@@ -87,6 +98,14 @@ describe("parseArgs", () => {
       command: "rebuild",
       allowMissingSsh: false,
       sshPublicKeyPath: "./keys/devbox.pub",
+    });
+  });
+
+  test("supports selecting a built-in template for up", () => {
+    expect(parseArgs(["up", "--template", "python"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      templateName: "python",
     });
   });
 
@@ -140,6 +159,16 @@ describe("parseArgs", () => {
       "The arise command does not accept --ssh-public-key.",
     );
   });
+
+  test("rebuild rejects --template", () => {
+    expect(() => parseArgs(["rebuild", "--template", "go"])).toThrow("The rebuild command does not accept --template.");
+  });
+
+  test("rejects combining --template with --devcontainer-subpath", () => {
+    expect(() => parseArgs(["up", "--template", "python", "--devcontainer-subpath", "services/api"])).toThrow(
+      "--template cannot be combined with --devcontainer-subpath.",
+    );
+  });
 });
 
 describe("helpText", () => {
@@ -164,6 +193,7 @@ describe("helpText", () => {
     expect(text).toContain("rebuild");
     expect(text).toContain("shell");
     expect(text).toContain("status");
+    expect(text).toContain("templates");
     expect(text).toContain("arise");
     expect(text).toContain("down");
     expect(text).toContain("help");
@@ -174,30 +204,87 @@ describe("resolvePort", () => {
   test("reuses stored port", () => {
     expect(
       resolvePort("up", undefined, {
-        version: 1,
+        version: 2,
         workspacePath: "/tmp/ws",
         workspaceHash: "hash",
         port: 5003,
+        configSource: "repo",
         sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
         generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
         labels: { managed: "true" },
         userDataDir: "/tmp/state",
+        template: null,
         updatedAt: new Date().toISOString(),
       }),
     ).toBe(5003);
   });
 });
 
+describe("loadWorkspaceState", () => {
+  test("migrates a version 1 workspace state file", async () => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
+    const stateHome = await mkdtemp(path.join(os.tmpdir(), "devbox-state-home-"));
+    tempPaths.push(workspacePath, stateHome);
+
+    const previousStateHome = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateHome;
+
+    try {
+      const statePath = getWorkspaceStateFile(workspacePath);
+      await mkdir(dirname(statePath), { recursive: true });
+      await writeFile(
+        statePath,
+        `${JSON.stringify({
+          version: 1,
+          workspacePath,
+          workspaceHash: "hash",
+          port: 5001,
+          sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+          generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
+          labels: { managed: "true" },
+          userDataDir: path.join(stateHome, "user-data"),
+          lastContainerId: "container-123",
+          updatedAt: "2026-04-23T00:00:00.000Z",
+        }, null, 2)}\n`,
+        "utf8",
+      );
+
+      await expect(loadWorkspaceState(workspacePath)).resolves.toEqual({
+        version: STATE_VERSION,
+        workspacePath,
+        workspaceHash: "hash",
+        port: 5001,
+        configSource: "repo",
+        sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+        generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
+        labels: { managed: "true" },
+        userDataDir: path.join(stateHome, "user-data"),
+        template: null,
+        lastContainerId: "container-123",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+      });
+    } finally {
+      if (previousStateHome === undefined) {
+        delete process.env.XDG_STATE_HOME;
+      } else {
+        process.env.XDG_STATE_HOME = previousStateHome;
+      }
+    }
+  });
+});
+
 describe("resolveUpPortPreference", () => {
   const state = {
-    version: 1,
+    version: 2,
     workspacePath: "/tmp/ws",
     workspaceHash: "hash",
     port: 5003,
+    configSource: "repo",
     sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
     generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
     labels: { managed: "true" },
     userDataDir: "/tmp/state",
+    template: null,
     updatedAt: new Date().toISOString(),
   };
 
@@ -294,6 +381,70 @@ describe("discoverDevcontainerConfig", () => {
     await expect(discoverDevcontainerConfig(tempDir, "missing")).rejects.toThrow(
       "Expected .devcontainer/missing/devcontainer.json.",
     );
+  });
+});
+
+describe("validateSupportedDevcontainerConfig", () => {
+  test("uses version-agnostic wording for unsupported docker-compose configs", () => {
+    expect(() => validateSupportedDevcontainerConfig({ dockerComposeFile: "docker-compose.yml" })).toThrow(
+      "dockerComposeFile-based devcontainers are not supported.",
+    );
+  });
+
+  test("uses version-agnostic wording for unsupported config shapes", () => {
+    expect(() => validateSupportedDevcontainerConfig({ features: {} })).toThrow(
+      "Only image- or Dockerfile-based devcontainers are supported.",
+    );
+  });
+});
+
+describe("resolveWorkspaceConfig", () => {
+  test("prefers the saved template source for rebuild-style resolution without changing up precedence", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    await mkdir(path.join(tempDir, ".devcontainer"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".devcontainer", "devcontainer.json"),
+      `{ "image": "mcr.microsoft.com/devcontainers/base:ubuntu" }`,
+    );
+
+    const template = getTemplateDefinition("python");
+    expect(template).not.toBeNull();
+    if (!template) {
+      throw new Error("Expected the built-in python template to exist.");
+    }
+
+    const state: WorkspaceState = {
+      version: STATE_VERSION,
+      workspacePath: tempDir,
+      workspaceHash: "workspace-hash",
+      port: 5001,
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: path.join(tempDir, ".devbox", "generated-template-devcontainer.json"),
+      labels: {},
+      userDataDir: path.join(tempDir, ".devbox", "user-data"),
+      template,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const upStyleResolution = await resolveWorkspaceConfig({
+      workspacePath: tempDir,
+      state,
+    });
+    expect(upStyleResolution.configSource).toBe("repo");
+    expect(upStyleResolution.sourceConfigPath).toBe(path.join(tempDir, ".devcontainer", "devcontainer.json"));
+
+    const rebuildStyleResolution = await resolveWorkspaceConfig({
+      workspacePath: tempDir,
+      state,
+      preferStateSource: true,
+    });
+    expect(rebuildStyleResolution.configSource).toBe("template");
+    expect(rebuildStyleResolution.sourceConfigPath).toBeNull();
+    expect(rebuildStyleResolution.generatedConfigPath).toBe(state.generatedConfigPath);
+    expect(rebuildStyleResolution.template?.name).toBe("python");
+    expect(rebuildStyleResolution.config.image).toBe("mcr.microsoft.com/devcontainers/python:3.0.7-3.14-bookworm");
   });
 });
 

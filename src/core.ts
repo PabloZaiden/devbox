@@ -17,8 +17,9 @@ import {
   STATE_VERSION,
   WORKSPACE_LABEL_KEY,
 } from "./constants";
+import { getTemplateDefinition } from "./templates";
 
-export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "arise" | "help";
+export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "arise" | "templates" | "help";
 
 export interface ParsedArgs {
   command: CommandName;
@@ -26,6 +27,7 @@ export interface ParsedArgs {
   allowMissingSsh: boolean;
   devcontainerSubpath?: string;
   sshPublicKeyPath?: string;
+  templateName?: string;
 }
 
 export type DevcontainerConfig = Record<string, unknown>;
@@ -54,12 +56,36 @@ export interface WorkspaceState {
   workspacePath: string;
   workspaceHash: string;
   port: number;
-  sourceConfigPath: string;
+  configSource: "repo" | "template";
+  sourceConfigPath: string | null;
   generatedConfigPath: string;
   labels: Record<string, string>;
   userDataDir: string;
+  template: WorkspaceTemplateState | null;
   lastContainerId?: string;
   updatedAt: string;
+}
+
+export interface WorkspaceTemplateState {
+  name: string;
+  description: string;
+  source: "built-in";
+  base: string;
+  image: string | null;
+  pinnedReference: string;
+  runtimeVersion: string;
+  languages: string[];
+  runnerCompatible: boolean;
+  config: DevcontainerConfig;
+}
+
+export interface ResolvedWorkspaceConfig {
+  config: DevcontainerConfig;
+  configSource: "repo" | "template";
+  sourceConfigPath: string | null;
+  generatedConfigPath: string;
+  legacyGeneratedConfigPath: string | null;
+  template: WorkspaceTemplateState | null;
 }
 
 export interface UpResult {
@@ -98,7 +124,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up       Start or reuse the managed devcontainer.\n  rebuild  Recreate the managed devcontainer.\n  shell    Open an interactive shell in the running managed container.\n  status   Print JSON describing the managed devbox for this workspace.\n  arise    Restart stopped managed workspaces discovered from existing containers.\n  down     Stop and remove the managed container for this workspace.\n  help     Show this help.\n\nOptions:\n  -p, --port <port>             Publish the same port on host and container.\n  --allow-missing-ssh           Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>       Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  -h, --help                    Show this help.`;
+  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} templates\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up         Start or reuse the managed devcontainer.\n  rebuild    Recreate the managed devcontainer.\n  shell      Open an interactive shell in the running managed container.\n  status     Print JSON describing the managed devbox for this workspace.\n  templates  Print JSON describing the built-in templates.\n  arise      Restart stopped managed workspaces discovered from existing containers.\n  down       Stop and remove the managed container for this workspace.\n  help       Show this help.\n\nOptions:\n  -p, --port <port>               Publish the same port on host and container.\n  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  --template <name>               Use a built-in template instead of a repo devcontainer.\n  -h, --help                      Show this help.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -111,7 +137,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let command: CommandName;
   const first = args[0];
 
-  if (first === "up" || first === "down" || first === "rebuild" || first === "shell" || first === "status" || first === "arise") {
+  if (
+    first === "up" ||
+    first === "down" ||
+    first === "rebuild" ||
+    first === "shell" ||
+    first === "status" ||
+    first === "arise" ||
+    first === "templates"
+  ) {
     command = first;
     args.shift();
   } else if (first === "help") {
@@ -126,6 +160,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let allowMissingSsh = false;
   let devcontainerSubpath: string | undefined;
   let sshPublicKeyPath: string | undefined;
+  let templateName: string | undefined;
   const positionals: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -162,6 +197,21 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       sshPublicKeyPath = parseCliPathOption(value, "--ssh-public-key");
       index += 1;
+      continue;
+    }
+
+    if (arg === "--template") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --template.");
+      }
+      templateName = parseTemplateName(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--template=")) {
+      templateName = parseTemplateName(arg.slice("--template=".length));
       continue;
     }
 
@@ -228,6 +278,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The arise command does not accept a port.");
   }
 
+  if (command === "templates" && port !== undefined) {
+    throw new UserError("The templates command does not accept a port.");
+  }
+
   if (command === "shell" && devcontainerSubpath !== undefined) {
     throw new UserError("The shell command does not accept --devcontainer-subpath.");
   }
@@ -238,6 +292,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (command === "arise" && devcontainerSubpath !== undefined) {
     throw new UserError("The arise command does not accept --devcontainer-subpath.");
+  }
+
+  if (command === "templates" && devcontainerSubpath !== undefined) {
+    throw new UserError("The templates command does not accept --devcontainer-subpath.");
   }
 
   if (command === "down" && sshPublicKeyPath !== undefined) {
@@ -256,6 +314,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The arise command does not accept --ssh-public-key.");
   }
 
+  if (command === "templates" && sshPublicKeyPath !== undefined) {
+    throw new UserError("The templates command does not accept --ssh-public-key.");
+  }
+
   if (command === "status" && allowMissingSsh) {
     throw new UserError("The status command does not accept --allow-missing-ssh.");
   }
@@ -264,13 +326,46 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The arise command does not accept --allow-missing-ssh.");
   }
 
-  if (devcontainerSubpath || sshPublicKeyPath) {
+  if (command === "templates" && allowMissingSsh) {
+    throw new UserError("The templates command does not accept --allow-missing-ssh.");
+  }
+
+  if (templateName !== undefined && devcontainerSubpath !== undefined) {
+    throw new UserError("--template cannot be combined with --devcontainer-subpath.");
+  }
+
+  if (command === "down" && templateName !== undefined) {
+    throw new UserError("The down command does not accept --template.");
+  }
+
+  if (command === "rebuild" && templateName !== undefined) {
+    throw new UserError("The rebuild command does not accept --template. Start fresh with `devbox up --template <name>`.");
+  }
+
+  if (command === "shell" && templateName !== undefined) {
+    throw new UserError("The shell command does not accept --template.");
+  }
+
+  if (command === "status" && templateName !== undefined) {
+    throw new UserError("The status command does not accept --template.");
+  }
+
+  if (command === "arise" && templateName !== undefined) {
+    throw new UserError("The arise command does not accept --template.");
+  }
+
+  if (command === "templates" && templateName !== undefined) {
+    throw new UserError("The templates command does not accept --template.");
+  }
+
+  if (devcontainerSubpath || sshPublicKeyPath || templateName) {
     return {
       command,
       port,
       allowMissingSsh,
       ...(devcontainerSubpath ? { devcontainerSubpath } : {}),
       ...(sshPublicKeyPath ? { sshPublicKeyPath } : {}),
+      ...(templateName ? { templateName } : {}),
     };
   }
 
@@ -326,6 +421,10 @@ export function getWorkspaceUserDataDir(workspacePath: string): string {
   return path.join(getWorkspaceStateDir(workspacePath), "user-data");
 }
 
+export function getTemplateGeneratedConfigPath(workspacePath: string): string {
+  return path.join(getWorkspaceStateDir(workspacePath), "template.devcontainer.json");
+}
+
 export function getDefaultRemoteWorkspaceFolder(workspacePath: string): string {
   return path.posix.join("/workspaces", path.basename(workspacePath));
 }
@@ -377,23 +476,14 @@ export async function loadWorkspaceState(workspacePath: string): Promise<Workspa
   }
 
   const raw = await readFile(statePath, "utf8");
-  const parsed = JSON.parse(raw) as Partial<WorkspaceState>;
+  const parsed = JSON.parse(raw) as unknown;
+  const migrated = migrateWorkspaceState(parsed);
 
-  if (
-    parsed.version !== STATE_VERSION ||
-    typeof parsed.workspacePath !== "string" ||
-    typeof parsed.workspaceHash !== "string" ||
-    typeof parsed.port !== "number" ||
-    typeof parsed.generatedConfigPath !== "string" ||
-    typeof parsed.sourceConfigPath !== "string" ||
-    typeof parsed.userDataDir !== "string" ||
-    !parsed.labels ||
-    typeof parsed.labels !== "object"
-  ) {
+  if (!migrated) {
     throw new UserError(`State file is invalid: ${statePath}`);
   }
 
-  return parsed as WorkspaceState;
+  return migrated;
 }
 
 export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
@@ -488,7 +578,7 @@ export async function discoverDevcontainerConfig(
 
 export function validateSupportedDevcontainerConfig(config: DevcontainerConfig): void {
   if (config.dockerComposeFile !== undefined) {
-    throw new UserError("dockerComposeFile-based devcontainers are not supported in v1.");
+    throw new UserError("dockerComposeFile-based devcontainers are not supported.");
   }
 
   const hasImage = typeof config.image === "string" && config.image.trim().length > 0;
@@ -497,7 +587,7 @@ export function validateSupportedDevcontainerConfig(config: DevcontainerConfig):
   const hasBuildDockerfile = typeof build?.dockerfile === "string" && build.dockerfile.trim().length > 0;
 
   if (!hasImage && !hasDockerFile && !hasBuildDockerfile) {
-    throw new UserError("Only image- or Dockerfile-based devcontainers are supported in v1.");
+    throw new UserError("Only image- or Dockerfile-based devcontainers are supported.");
   }
 }
 
@@ -565,10 +655,12 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
 export function createWorkspaceState(input: {
   workspacePath: string;
   port: number;
-  sourceConfigPath: string;
+  configSource: "repo" | "template";
+  sourceConfigPath: string | null;
   generatedConfigPath: string;
   userDataDir: string;
   labels: Record<string, string>;
+  template: WorkspaceTemplateState | null;
   containerId?: string;
 }): WorkspaceState {
   return {
@@ -576,13 +668,86 @@ export function createWorkspaceState(input: {
     workspacePath: input.workspacePath,
     workspaceHash: hashWorkspacePath(input.workspacePath),
     port: input.port,
+    configSource: input.configSource,
     sourceConfigPath: input.sourceConfigPath,
     generatedConfigPath: input.generatedConfigPath,
     labels: input.labels,
     userDataDir: input.userDataDir,
+    template: input.template ? cloneTemplateState(input.template) : null,
     lastContainerId: input.containerId,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export async function resolveWorkspaceConfig(input: {
+  workspacePath: string;
+  devcontainerSubpath?: string;
+  templateName?: string;
+  state: WorkspaceState | null;
+  preferStateSource?: boolean;
+}): Promise<ResolvedWorkspaceConfig> {
+  if (input.templateName) {
+    const template = resolveBuiltInTemplate(input.templateName);
+    return {
+      config: structuredClone(template.config),
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: getTemplateGeneratedConfigPath(input.workspacePath),
+      legacyGeneratedConfigPath: null,
+      template,
+    };
+  }
+
+  if (input.devcontainerSubpath) {
+    const discovered = await discoverDevcontainerConfig(input.workspacePath, input.devcontainerSubpath);
+    return {
+      config: discovered.config,
+      configSource: "repo",
+      sourceConfigPath: discovered.path,
+      generatedConfigPath: getGeneratedConfigPath(discovered.path),
+      legacyGeneratedConfigPath: getLegacyGeneratedConfigPath(discovered.path),
+      template: null,
+    };
+  }
+
+  if (input.preferStateSource && input.state?.configSource === "template" && input.state.template) {
+    return {
+      config: structuredClone(input.state.template.config),
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: input.state.generatedConfigPath || getTemplateGeneratedConfigPath(input.workspacePath),
+      legacyGeneratedConfigPath: null,
+      template: cloneTemplateState(input.state.template),
+    };
+  }
+
+  const discovered = await discoverDevcontainerConfigIfPresent(input.workspacePath);
+  if (discovered) {
+    return {
+      config: discovered.config,
+      configSource: "repo",
+      sourceConfigPath: discovered.path,
+      generatedConfigPath: getGeneratedConfigPath(discovered.path),
+      legacyGeneratedConfigPath: getLegacyGeneratedConfigPath(discovered.path),
+      template: null,
+    };
+  }
+
+  if (input.state?.configSource === "template" && input.state.template) {
+    return {
+      config: structuredClone(input.state.template.config),
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: input.state.generatedConfigPath || getTemplateGeneratedConfigPath(input.workspacePath),
+      legacyGeneratedConfigPath: null,
+      template: cloneTemplateState(input.state.template),
+    };
+  }
+
+  throw new UserError(
+    `No devcontainer definition was found in ${input.workspacePath}. ` +
+    `Use \`${CLI_NAME} templates\` to list built-in templates, then run \`${CLI_NAME} up --template <name>\`.`,
+  );
 }
 
 export async function prepareKnownHostsMount(input: {
@@ -695,6 +860,14 @@ function parseCliPathOption(raw: string, optionName: string): string {
   return trimmed;
 }
 
+function parseTemplateName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(trimmed)) {
+    throw new UserError(`Invalid template name: ${raw}`);
+  }
+  return trimmed;
+}
+
 function getDevcontainerCandidates(workspacePath: string, devcontainerSubpath?: string): string[] {
   if (devcontainerSubpath) {
     return [path.join(workspacePath, ".devcontainer", devcontainerSubpath, "devcontainer.json")];
@@ -704,6 +877,21 @@ function getDevcontainerCandidates(workspacePath: string, devcontainerSubpath?: 
     path.join(workspacePath, ".devcontainer", "devcontainer.json"),
     path.join(workspacePath, ".devcontainer.json"),
   ];
+}
+
+async function discoverDevcontainerConfigIfPresent(workspacePath: string): Promise<DiscoveredConfig | null> {
+  try {
+    return await discoverDevcontainerConfig(workspacePath);
+  } catch (error) {
+    if (
+      error instanceof UserError &&
+      error.message.startsWith("No devcontainer definition was found in ")
+    ) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 function formatDevcontainerSubpath(subpath: string): string {
@@ -794,4 +982,134 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return value as Record<string, unknown>;
+}
+
+function resolveBuiltInTemplate(name: string): WorkspaceTemplateState {
+  const definition = getTemplateDefinition(name);
+  if (!definition) {
+    throw new UserError(`Unknown template: ${name}. Run \`${CLI_NAME} templates\` to list available templates.`);
+  }
+
+  if (!definition.runnerCompatible) {
+    throw new UserError(`Template ${name} is not compatible with ssh-server-runner.`);
+  }
+
+  validateSupportedDevcontainerConfig(definition.config);
+
+  return {
+    name: definition.name,
+    description: definition.description,
+    source: definition.source,
+    base: definition.base,
+    image: definition.image,
+    pinnedReference: definition.pinnedReference,
+    runtimeVersion: definition.runtimeVersion,
+    languages: [...definition.languages],
+    runnerCompatible: definition.runnerCompatible,
+    config: structuredClone(definition.config),
+  };
+}
+
+function assertValidTemplateState(value: unknown): asserts value is WorkspaceTemplateState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new UserError("State file template entry is invalid.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.name !== "string" ||
+    typeof record.description !== "string" ||
+    record.source !== "built-in" ||
+    typeof record.base !== "string" ||
+    (record.image !== null && typeof record.image !== "string") ||
+    typeof record.pinnedReference !== "string" ||
+    typeof record.runtimeVersion !== "string" ||
+    !Array.isArray(record.languages) ||
+    record.languages.some((entry) => typeof entry !== "string") ||
+    typeof record.runnerCompatible !== "boolean" ||
+    !record.config ||
+    typeof record.config !== "object" ||
+    Array.isArray(record.config)
+  ) {
+    throw new UserError("State file template entry is invalid.");
+  }
+}
+
+function migrateWorkspaceState(value: unknown): WorkspaceState | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.workspacePath !== "string" ||
+    typeof record.workspaceHash !== "string" ||
+    typeof record.port !== "number" ||
+    typeof record.generatedConfigPath !== "string" ||
+    typeof record.userDataDir !== "string" ||
+    !record.labels ||
+    typeof record.labels !== "object" ||
+    Array.isArray(record.labels)
+  ) {
+    return null;
+  }
+
+  const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString();
+  const lastContainerId = typeof record.lastContainerId === "string" ? record.lastContainerId : undefined;
+
+  if (record.version === 1) {
+    if (typeof record.sourceConfigPath !== "string") {
+      return null;
+    }
+
+    return {
+      version: STATE_VERSION,
+      workspacePath: record.workspacePath,
+      workspaceHash: record.workspaceHash,
+      port: record.port,
+      configSource: "repo",
+      sourceConfigPath: record.sourceConfigPath,
+      generatedConfigPath: record.generatedConfigPath,
+      labels: record.labels as Record<string, string>,
+      userDataDir: record.userDataDir,
+      template: null,
+      lastContainerId,
+      updatedAt,
+    };
+  }
+
+  if (
+    record.version !== STATE_VERSION ||
+    (record.configSource !== "repo" && record.configSource !== "template") ||
+    (record.sourceConfigPath !== null && typeof record.sourceConfigPath !== "string")
+  ) {
+    return null;
+  }
+
+  if (record.template !== null && record.template !== undefined) {
+    assertValidTemplateState(record.template);
+  }
+
+  return {
+    version: STATE_VERSION,
+    workspacePath: record.workspacePath,
+    workspaceHash: record.workspaceHash,
+    port: record.port,
+    configSource: record.configSource,
+    sourceConfigPath: record.sourceConfigPath,
+    generatedConfigPath: record.generatedConfigPath,
+    labels: record.labels as Record<string, string>,
+    userDataDir: record.userDataDir,
+    template: (record.template as WorkspaceTemplateState | null | undefined) ?? null,
+    lastContainerId,
+    updatedAt,
+  };
+}
+
+function cloneTemplateState(template: WorkspaceTemplateState): WorkspaceTemplateState {
+  return {
+    ...template,
+    languages: [...template.languages],
+    config: structuredClone(template.config),
+  };
 }

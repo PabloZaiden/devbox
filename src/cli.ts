@@ -4,13 +4,9 @@ import path from "node:path";
 import {
   buildManagedConfig,
   createWorkspaceState,
-  deleteWorkspaceState,
   describeUpPortStrategy,
-  discoverDevcontainerConfig,
   formatReadyMessage,
   getDefaultRemoteWorkspaceFolder,
-  getGeneratedConfigPath,
-  getLegacyGeneratedConfigPath,
   getManagedContainerName,
   getManagedPortFromContainerName,
   getManagedLabels,
@@ -20,6 +16,7 @@ import {
   helpText,
   loadWorkspaceState,
   parseArgs,
+  resolveWorkspaceConfig,
   removeGeneratedConfig,
   resolvePort,
   resolveUpPortPreference,
@@ -68,6 +65,7 @@ import {
 import { createRunnerMetadata, serializeRunnerMetadata } from "./runnerState";
 import { getDevboxStatus } from "./status";
 import { ariseManagedWorkspaces } from "./arise";
+import { listTemplateSummaries } from "./templates";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
@@ -78,6 +76,11 @@ async function main(): Promise<void> {
 
   if (parsed.command === "arise") {
     await handleArise();
+    return;
+  }
+
+  if (parsed.command === "templates") {
+    console.log(JSON.stringify(listTemplateSummaries(), null, 2));
     return;
   }
 
@@ -107,6 +110,7 @@ async function main(): Promise<void> {
     parsed.allowMissingSsh,
     parsed.devcontainerSubpath,
     parsed.sshPublicKeyPath,
+    parsed.templateName,
   );
 }
 
@@ -118,6 +122,7 @@ async function handleUpLike(
   allowMissingSsh: boolean,
   devcontainerSubpath: string | undefined,
   sshPublicKeyPath?: string,
+  templateName?: string,
 ): Promise<void> {
   const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
   const resolvedSshPublicKey = await resolveSshPublicKey({ overridePath: sshPublicKeyPath });
@@ -143,14 +148,19 @@ async function handleUpLike(
       : resolvePort(command, explicitPort, state);
 
   console.log(`Using port ${port}. ${command === "up" ? describeUpPortStrategy() : ""}`.trim());
-  const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
-  const generatedConfigPath = getGeneratedConfigPath(discovered.path);
-  const legacyGeneratedConfigPath = getLegacyGeneratedConfigPath(discovered.path);
+  const resolvedConfig = await resolveWorkspaceConfig({
+    workspacePath,
+    devcontainerSubpath,
+    templateName,
+    state,
+    preferStateSource: command === "rebuild",
+  });
+  const generatedConfigPath = resolvedConfig.generatedConfigPath;
   const userDataDir = getWorkspaceUserDataDir(workspacePath);
   const preparedKnownHosts = await prepareKnownHostsMount({ userDataDir });
   const containerName = getManagedContainerName(workspacePath, port);
 
-  const managedConfig = buildManagedConfig(discovered.config, {
+  const managedConfig = buildManagedConfig(resolvedConfig.config, {
     port,
     containerName,
     sshAuthSock: environment.sshAuthSock,
@@ -186,8 +196,12 @@ async function handleUpLike(
     console.log("Using host GitHub authentication from gh.");
   }
 
-  await ensureGeneratedConfigIgnored(workspacePath, generatedConfigPath);
-  await removeGeneratedConfig(legacyGeneratedConfigPath);
+  if (resolvedConfig.configSource === "repo" && resolvedConfig.sourceConfigPath) {
+    await ensureGeneratedConfigIgnored(workspacePath, generatedConfigPath);
+  }
+  if (resolvedConfig.legacyGeneratedConfigPath) {
+    await removeGeneratedConfig(resolvedConfig.legacyGeneratedConfigPath);
+  }
   await writeManagedConfig(generatedConfigPath, managedConfig);
 
   if (command === "rebuild") {
@@ -290,10 +304,12 @@ async function handleUpLike(
     createWorkspaceState({
       workspacePath,
       port,
-      sourceConfigPath: discovered.path,
+      configSource: resolvedConfig.configSource,
+      sourceConfigPath: resolvedConfig.sourceConfigPath,
       generatedConfigPath,
       userDataDir,
       labels,
+      template: resolvedConfig.template,
       containerId: upResult.containerId,
     }),
   );
@@ -347,19 +363,33 @@ async function handleDown(
     generatedConfigPaths.add(state.generatedConfigPath);
   }
 
-  try {
-    const discovered = await discoverDevcontainerConfig(workspacePath, devcontainerSubpath);
-    generatedConfigPaths.add(getGeneratedConfigPath(discovered.path));
-    generatedConfigPaths.add(getLegacyGeneratedConfigPath(discovered.path));
-  } catch {
-    // Workspace may no longer contain a devcontainer definition; cleanup still continues.
+  if (state?.configSource === "repo") {
+    try {
+      const resolvedConfig = await resolveWorkspaceConfig({
+        workspacePath,
+        devcontainerSubpath,
+        state,
+      });
+      generatedConfigPaths.add(resolvedConfig.generatedConfigPath);
+      if (resolvedConfig.legacyGeneratedConfigPath) {
+        generatedConfigPaths.add(resolvedConfig.legacyGeneratedConfigPath);
+      }
+    } catch {
+      // Workspace may no longer contain a devcontainer definition; cleanup still continues.
+    }
   }
 
   for (const generatedConfigPath of generatedConfigPaths) {
     await removeGeneratedConfig(generatedConfigPath);
   }
 
-  await deleteWorkspaceState(workspacePath);
+  if (state) {
+    await saveWorkspaceState({
+      ...state,
+      lastContainerId: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+  }
 
   if (containerIds.length === 0) {
     console.log("No managed container was running for this workspace.");

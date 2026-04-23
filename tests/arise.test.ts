@@ -235,14 +235,16 @@ describe("ariseManagedWorkspaces", () => {
       [
         "/tmp/ok",
         {
-          version: 1,
+          version: 2,
           workspacePath: "/tmp/ok",
           workspaceHash: "hash-ok",
           port: 5001,
+          configSource: "repo",
           sourceConfigPath: "/tmp/ok/.devcontainer/services/api/devcontainer.json",
           generatedConfigPath: "/tmp/ok/.devcontainer/.devcontainer.json",
           labels: { "devbox.managed": "true", "devbox.workspace": "hash-ok" },
           userDataDir: "/tmp/state-ok",
+          template: null,
           updatedAt: "2026-03-20T00:00:00.000Z",
         },
       ],
