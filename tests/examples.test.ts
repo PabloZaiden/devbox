@@ -545,13 +545,15 @@ describe("example workspaces (simulated host tools)", () => {
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
-    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
-    expect(String(generatedConfig.postCreateCommand)).toContain('bun-v1.3.13');
+    expect(generatedConfig.image).toBe("oven/bun:1.3.13");
+    expect(generatedConfig.postCreateCommand).toBeUndefined();
 
     const state = await readJson(fixture.statePath);
     expect(state.configSource).toBe("template");
     expect(state.sourceConfigPath).toBeNull();
     expect(state.template.name).toBe("bun");
+    expect(state.template.image).toBe("oven/bun:1.3.13");
+    expect(state.template.pinnedReference).toBe("oven/bun:1.3.13");
     expect(state.template.runtimeVersion).toBe("Bun 1.3.13");
 
     const statusWhileRunning = runCli(fixture, ["status"]);

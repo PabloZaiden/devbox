@@ -153,6 +153,7 @@ async function handleUpLike(
     devcontainerSubpath,
     templateName,
     state,
+    preferStateSource: command === "rebuild",
   });
   const generatedConfigPath = resolvedConfig.generatedConfigPath;
   const userDataDir = getWorkspaceUserDataDir(workspacePath);

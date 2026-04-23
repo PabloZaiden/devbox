@@ -592,7 +592,7 @@ export async function discoverDevcontainerConfig(
 
 export function validateSupportedDevcontainerConfig(config: DevcontainerConfig): void {
   if (config.dockerComposeFile !== undefined) {
-    throw new UserError("dockerComposeFile-based devcontainers are not supported in v1.");
+    throw new UserError("dockerComposeFile-based devcontainers are not supported.");
   }
 
   const hasImage = typeof config.image === "string" && config.image.trim().length > 0;
@@ -601,7 +601,7 @@ export function validateSupportedDevcontainerConfig(config: DevcontainerConfig):
   const hasBuildDockerfile = typeof build?.dockerfile === "string" && build.dockerfile.trim().length > 0;
 
   if (!hasImage && !hasDockerFile && !hasBuildDockerfile) {
-    throw new UserError("Only image- or Dockerfile-based devcontainers are supported in v1.");
+    throw new UserError("Only image- or Dockerfile-based devcontainers are supported.");
   }
 }
 
@@ -698,6 +698,7 @@ export async function resolveWorkspaceConfig(input: {
   devcontainerSubpath?: string;
   templateName?: string;
   state: WorkspaceState | null;
+  preferStateSource?: boolean;
 }): Promise<ResolvedWorkspaceConfig> {
   if (input.templateName) {
     const template = resolveBuiltInTemplate(input.templateName);
@@ -720,6 +721,17 @@ export async function resolveWorkspaceConfig(input: {
       generatedConfigPath: getGeneratedConfigPath(discovered.path),
       legacyGeneratedConfigPath: getLegacyGeneratedConfigPath(discovered.path),
       template: null,
+    };
+  }
+
+  if (input.preferStateSource && input.state?.configSource === "template" && input.state.template) {
+    return {
+      config: structuredClone(input.state.template.config),
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: input.state.generatedConfigPath || getTemplateGeneratedConfigPath(input.workspacePath),
+      legacyGeneratedConfigPath: null,
+      template: cloneTemplateState(input.state.template),
     };
   }
 

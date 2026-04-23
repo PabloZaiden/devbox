@@ -27,6 +27,7 @@ export interface DevboxTemplateSummary {
 
 const BUN_VERSION = "1.3.13";
 const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04";
+const BUN_IMAGE = `oven/bun:${BUN_VERSION}`;
 
 const TEMPLATE_DEFINITIONS: Record<string, DevboxTemplateDefinition> = {
   ubuntu: {
@@ -73,28 +74,16 @@ const TEMPLATE_DEFINITIONS: Record<string, DevboxTemplateDefinition> = {
   },
   bun: {
     name: "bun",
-    description: `Ubuntu 24.04 base image with Bun ${BUN_VERSION} installed via the official installer.`,
+    description: `Official Bun ${BUN_VERSION} image on Debian trixie.`,
     source: "built-in",
-    base: "ubuntu24.04",
-    image: BASE_IMAGE,
-    pinnedReference: `${BASE_IMAGE} + bun-v${BUN_VERSION}`,
+    base: "trixie",
+    image: BUN_IMAGE,
+    pinnedReference: BUN_IMAGE,
     runtimeVersion: `Bun ${BUN_VERSION}`,
     languages: ["bun", "javascript", "typescript"],
     runnerCompatible: true,
     config: {
-      image: BASE_IMAGE,
-      postCreateCommand: [
-        "set -euo pipefail",
-        `if ! command -v bun >/dev/null 2>&1 || [ "$(bun --version 2>/dev/null || true)" != "${BUN_VERSION}" ]; then`,
-        `  curl -fsSL https://bun.com/install | bash -s "bun-v${BUN_VERSION}"`,
-        "fi",
-        'if ! grep -qs \'export BUN_INSTALL="$HOME/.bun"\' ~/.profile; then',
-        '  printf \'\\nexport BUN_INSTALL="$HOME/.bun"\\nexport PATH="$BUN_INSTALL/bin:$PATH"\\n\' >> ~/.profile',
-        "fi",
-        'if ! grep -qs \'export BUN_INSTALL="$HOME/.bun"\' ~/.bashrc; then',
-        '  printf \'\\nexport BUN_INSTALL="$HOME/.bun"\\nexport PATH="$BUN_INSTALL/bin:$PATH"\\n\' >> ~/.bashrc',
-        "fi",
-      ].join("\n"),
+      image: BUN_IMAGE,
     },
   },
   python: {

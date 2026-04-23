@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import pkg from "../package.json";
-import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE } from "../src/constants";
+import { DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE, STATE_VERSION } from "../src/constants";
 import {
   buildManagedConfig,
   describeUpPortStrategy,
@@ -19,10 +19,14 @@ import {
   helpText,
   parseArgs,
   prepareKnownHostsMount,
+  resolveWorkspaceConfig,
   resolvePort,
   resolveUpPortPreference,
+  validateSupportedDevcontainerConfig,
   type DevcontainerConfig,
+  type WorkspaceState,
 } from "../src/core";
+import { getTemplateDefinition } from "../src/templates";
 
 const tempPaths: string[] = [];
 
@@ -321,6 +325,70 @@ describe("discoverDevcontainerConfig", () => {
     await expect(discoverDevcontainerConfig(tempDir, "missing")).rejects.toThrow(
       "Expected .devcontainer/missing/devcontainer.json.",
     );
+  });
+});
+
+describe("validateSupportedDevcontainerConfig", () => {
+  test("uses version-agnostic wording for unsupported docker-compose configs", () => {
+    expect(() => validateSupportedDevcontainerConfig({ dockerComposeFile: "docker-compose.yml" })).toThrow(
+      "dockerComposeFile-based devcontainers are not supported.",
+    );
+  });
+
+  test("uses version-agnostic wording for unsupported config shapes", () => {
+    expect(() => validateSupportedDevcontainerConfig({ features: {} })).toThrow(
+      "Only image- or Dockerfile-based devcontainers are supported.",
+    );
+  });
+});
+
+describe("resolveWorkspaceConfig", () => {
+  test("prefers the saved template source for rebuild-style resolution without changing up precedence", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+    await mkdir(path.join(tempDir, ".devcontainer"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, ".devcontainer", "devcontainer.json"),
+      `{ "image": "mcr.microsoft.com/devcontainers/base:ubuntu" }`,
+    );
+
+    const template = getTemplateDefinition("python");
+    expect(template).not.toBeNull();
+    if (!template) {
+      throw new Error("Expected the built-in python template to exist.");
+    }
+
+    const state: WorkspaceState = {
+      version: STATE_VERSION,
+      workspacePath: tempDir,
+      workspaceHash: "workspace-hash",
+      port: 5001,
+      configSource: "template",
+      sourceConfigPath: null,
+      generatedConfigPath: path.join(tempDir, ".devbox", "generated-template-devcontainer.json"),
+      labels: {},
+      userDataDir: path.join(tempDir, ".devbox", "user-data"),
+      template,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const upStyleResolution = await resolveWorkspaceConfig({
+      workspacePath: tempDir,
+      state,
+    });
+    expect(upStyleResolution.configSource).toBe("repo");
+    expect(upStyleResolution.sourceConfigPath).toBe(path.join(tempDir, ".devcontainer", "devcontainer.json"));
+
+    const rebuildStyleResolution = await resolveWorkspaceConfig({
+      workspacePath: tempDir,
+      state,
+      preferStateSource: true,
+    });
+    expect(rebuildStyleResolution.configSource).toBe("template");
+    expect(rebuildStyleResolution.sourceConfigPath).toBeNull();
+    expect(rebuildStyleResolution.generatedConfigPath).toBe(state.generatedConfigPath);
+    expect(rebuildStyleResolution.template?.name).toBe("python");
+    expect(rebuildStyleResolution.config.image).toBe("mcr.microsoft.com/devcontainers/python:3.0.7-3.14-bookworm");
   });
 });
 
