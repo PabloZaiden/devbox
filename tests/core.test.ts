@@ -446,7 +446,13 @@ describe("resolveWorkspaceConfig", () => {
     expect(rebuildStyleResolution.sourceConfigPath).toBeNull();
     expect(rebuildStyleResolution.generatedConfigPath).toBe(state.generatedConfigPath);
     expect(rebuildStyleResolution.template?.name).toBe("python");
-    expect(rebuildStyleResolution.config.image).toBe("mcr.microsoft.com/devcontainers/python:3.0.7-3.14-bookworm");
+    expect(rebuildStyleResolution.config).toEqual({
+      image: "mcr.microsoft.com/devcontainers/base:noble",
+      features: {
+        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+        "ghcr.io/devcontainers-extra/features/uv:1": {},
+      },
+    });
   });
 
   test("normalizes legacy template generated config paths from saved state", async () => {

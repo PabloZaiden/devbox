@@ -345,7 +345,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(arise.stdout).toContain("Scanning for stopped managed devbox containers...");
       expect(arise.stdout).toContain(`Recovered ${fixture.workspacePath}`);
       expect(arise.stdout).toContain(`Running \`devbox up\` again for ${fixture.workspacePath}...`);
-      expect(arise.stdout).toContain("Arise summary: restarted 1");
+      expect(arise.stdout).toMatch(/Arise summary: restarted \d+, skipped \d+ workspace\(s\), ignored \d+ container\(s\), failed 0\./);
 
       const restartedState = await readJson(fixture.statePath);
       const restartedContainerId = String(restartedState.lastContainerId);

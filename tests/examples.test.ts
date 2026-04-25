@@ -534,7 +534,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(templates.exitCode).toBe(0);
     const templateList = JSON.parse(templates.stdout);
     expect(templateList.some((entry: { name: string }) => entry.name === "ubuntu")).toBe(true);
-    expect(templateList.some((entry: { name: string }) => entry.name === "bun")).toBe(true);
+    expect(templateList.some((entry: { name: string }) => entry.name === "typescript")).toBe(true);
 
     const up = runCli(fixture, ["up", "--template", "ubuntu", "--allow-missing-ssh"]);
     expect(up.exitCode).toBe(0);
@@ -542,16 +542,21 @@ describe("example workspaces (simulated host tools)", () => {
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
-    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
+    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
+    expect(generatedConfig.features).toEqual({
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    });
     expect(generatedConfig.postCreateCommand).toBeUndefined();
 
     const state = await readJson(fixture.statePath);
     expect(state.configSource).toBe("template");
     expect(state.sourceConfigPath).toBeNull();
     expect(state.template.name).toBe("ubuntu");
-    expect(state.template.image).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
-    expect(state.template.pinnedReference).toBe("mcr.microsoft.com/devcontainers/base:2.1.8-ubuntu24.04");
-    expect(state.template.runtimeVersion).toBe("Ubuntu 24.04");
+    expect(state.template.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
+    expect(state.template.pinnedReference).toBe(
+      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:2",
+    );
+    expect(state.template.runtimeVersion).toBe("Ubuntu noble");
 
     const statusWhileRunning = runCli(fixture, ["status"]);
     expect(statusWhileRunning.exitCode).toBe(0);
