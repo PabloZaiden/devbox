@@ -110,8 +110,7 @@ Built-in templates:
 
 - `ubuntu`
 - `dotnet`
-- `node-typescript`
-- `bun`
+- `typescript`
 - `python`
 - `go`
 - `rust`
