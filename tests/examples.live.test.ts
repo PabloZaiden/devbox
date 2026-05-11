@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
-  CLI_NAME,
   DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   MANAGED_LABEL_KEY,
@@ -433,7 +432,6 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
   env.HOME = homeDir;
   env.PATH = `${wrappersDir}${path.delimiter}${env.PATH}`;
   env.SSH_AUTH_SOCK = sshAuthSockPath ?? "";
-  env.XDG_STATE_HOME = path.join(tempRoot, "state");
 
   const fixture: LiveFixture = {
     env,
@@ -458,7 +456,7 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
     runnerHostKeyMarker,
     sampleFilePath: path.join(workspacePath, "sample-file.txt"),
     sshAuthSockPath,
-    statePath: getStatePath(homeDir, workspacePath, env.XDG_STATE_HOME),
+    statePath: getStatePath(workspacePath),
     workspacePath,
   };
 
@@ -996,20 +994,8 @@ function baseEnv(): Record<string, string> {
   return env;
 }
 
-function getStatePath(homeDir: string, workspacePath: string, xdgStateHome?: string): string {
-  return path.join(getStateRoot(homeDir, xdgStateHome), "workspaces", hashWorkspacePath(workspacePath), "state.json");
-}
-
-function getStateRoot(homeDir: string, xdgStateHome?: string): string {
-  if (process.platform === "darwin") {
-    return path.join(homeDir, "Library", "Application Support", CLI_NAME);
-  }
-
-  if (xdgStateHome) {
-    return path.join(xdgStateHome, CLI_NAME);
-  }
-
-  return path.join(homeDir, ".local", "state", CLI_NAME);
+function getStatePath(workspacePath: string): string {
+  return path.join(workspacePath, ".devbox", "state.json");
 }
 
 function findExecutable(command: string): string | null {

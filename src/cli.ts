@@ -11,6 +11,7 @@ import {
   getManagedPortFromContainerName,
   getManagedLabels,
   prepareKnownHostsMount,
+  getWorkspaceStateDir,
   getWorkspaceUserDataDir,
   hashWorkspacePath,
   helpText,
@@ -199,6 +200,7 @@ async function handleUpLike(
   if (resolvedConfig.configSource === "repo" && resolvedConfig.sourceConfigPath) {
     await ensureGeneratedConfigIgnored(workspacePath, generatedConfigPath);
   }
+  await ensurePathIgnored(workspacePath, getWorkspaceStateDir(workspacePath));
   if (resolvedConfig.legacyGeneratedConfigPath) {
     await removeGeneratedConfig(resolvedConfig.legacyGeneratedConfigPath);
   }

@@ -1,4 +1,3 @@
-import { dirname } from "node:path";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +13,6 @@ import {
   getContainerSshAuthSockPath,
   getGeneratedConfigPath,
   getLegacyGeneratedConfigPath,
-  getLegacyTemplateGeneratedConfigPath,
   getManagedContainerName,
   getManagedPortFromContainerName,
   getManagedLabels,
@@ -223,55 +221,44 @@ describe("resolvePort", () => {
 });
 
 describe("loadWorkspaceState", () => {
-  test("migrates a version 1 workspace state file", async () => {
+  test("loads a version 1 workspace state file from local workspace state", async () => {
     const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
-    const stateHome = await mkdtemp(path.join(os.tmpdir(), "devbox-state-home-"));
-    tempPaths.push(workspacePath, stateHome);
+    tempPaths.push(workspacePath);
 
-    const previousStateHome = process.env.XDG_STATE_HOME;
-    process.env.XDG_STATE_HOME = stateHome;
-
-    try {
-      const statePath = getWorkspaceStateFile(workspacePath);
-      await mkdir(dirname(statePath), { recursive: true });
-      await writeFile(
-        statePath,
-        `${JSON.stringify({
-          version: 1,
-          workspacePath,
-          workspaceHash: "hash",
-          port: 5001,
-          sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
-          generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
-          labels: { managed: "true" },
-          userDataDir: path.join(stateHome, "user-data"),
-          lastContainerId: "container-123",
-          updatedAt: "2026-04-23T00:00:00.000Z",
-        }, null, 2)}\n`,
-        "utf8",
-      );
-
-      await expect(loadWorkspaceState(workspacePath)).resolves.toEqual({
-        version: STATE_VERSION,
+    const statePath = getWorkspaceStateFile(workspacePath);
+    expect(statePath).toBe(path.join(workspacePath, ".devbox", "state.json"));
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        version: 1,
         workspacePath,
         workspaceHash: "hash",
         port: 5001,
-        configSource: "repo",
         sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
         generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
         labels: { managed: "true" },
-        userDataDir: path.join(stateHome, "user-data"),
-        template: null,
+        userDataDir: path.join(workspacePath, ".devbox", "user-data"),
         lastContainerId: "container-123",
         updatedAt: "2026-04-23T00:00:00.000Z",
-      });
-    } finally {
-      if (previousStateHome === undefined) {
-        delete process.env.XDG_STATE_HOME;
-      } else {
-        process.env.XDG_STATE_HOME = previousStateHome;
-      }
-    }
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(loadWorkspaceState(workspacePath)).resolves.toEqual({
+      version: STATE_VERSION,
+      workspacePath,
+      workspaceHash: "hash",
+      port: 5001,
+      configSource: "repo",
+      sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+      generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
+      labels: { managed: "true" },
+      userDataDir: path.join(workspacePath, ".devbox", "user-data"),
+      template: null,
+      lastContainerId: "container-123",
+      updatedAt: "2026-04-23T00:00:00.000Z",
+    });
   });
 });
 
@@ -455,7 +442,7 @@ describe("resolveWorkspaceConfig", () => {
     });
   });
 
-  test("normalizes legacy template generated config paths from saved state", async () => {
+  test("uses the local template generated config path instead of saved stale paths", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
     tempPaths.push(tempDir);
     const template = getTemplateDefinition("ubuntu");
@@ -471,7 +458,7 @@ describe("resolveWorkspaceConfig", () => {
       port: 5001,
       configSource: "template",
       sourceConfigPath: null,
-      generatedConfigPath: getLegacyTemplateGeneratedConfigPath(tempDir),
+      generatedConfigPath: path.join(os.tmpdir(), "old-devbox-state", ".devcontainer.json"),
       labels: {},
       userDataDir: path.join(tempDir, ".devbox", "user-data"),
       template,
@@ -485,7 +472,7 @@ describe("resolveWorkspaceConfig", () => {
     });
 
     expect(resolution.generatedConfigPath).toBe(getTemplateGeneratedConfigPath(tempDir));
-    expect(resolution.legacyGeneratedConfigPath).toBe(getLegacyTemplateGeneratedConfigPath(tempDir));
+    expect(resolution.legacyGeneratedConfigPath).toBeNull();
   });
 });
 

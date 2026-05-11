@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { KNOWN_HOSTS_SNAPSHOT_FILENAME, SSH_AUTH_SOCK_TARGET } from "../src/constants";
-import { getGeneratedConfigPath, hashWorkspacePath } from "../src/core";
+import { getGeneratedConfigPath } from "../src/core";
 import { buildInteractiveShellScript } from "../src/runtime";
 
 const repoRoot = process.cwd();
@@ -618,7 +618,6 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
     await writeFile(sshAuthSockPath, "fake-agent\n", "utf8");
   }
 
-  const xdgStateHome = path.join(tempDir, "state");
   const env = baseEnv();
   env.DEVBOX_FAKE_GH_MODE = options.ghToken ? "token" : "unauthenticated";
   env.DEVBOX_FAKE_GH_TOKEN = options.ghToken ?? "";
@@ -627,9 +626,8 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
   env.HOME = homeDir;
   env.PATH = `${path.join(fakeHostDir, "bin")}${path.delimiter}${env.PATH}`;
   env.SSH_AUTH_SOCK = sshAuthSockPath ?? "";
-  env.XDG_STATE_HOME = xdgStateHome;
 
-  const stateDir = getStateDir(homeDir, workspacePath, xdgStateHome);
+  const stateDir = getStateDir(workspacePath);
   const sourceConfigPath = resolveExampleSourceConfigPath(workspacePath);
   return {
     commandLogPath,
@@ -713,16 +711,8 @@ function baseEnv(): Record<string, string> {
   return env;
 }
 
-function getStateDir(homeDir: string, workspacePath: string, xdgStateHome?: string): string {
-  let root: string;
-  if (process.platform === "darwin") {
-    root = path.join(homeDir, "Library", "Application Support", "devbox");
-  } else if (xdgStateHome) {
-    root = path.join(xdgStateHome, "devbox");
-  } else {
-    root = path.join(homeDir, ".local", "state", "devbox");
-  }
-  return path.join(root, "workspaces", hashWorkspacePath(workspacePath));
+function getStateDir(workspacePath: string): string {
+  return path.join(workspacePath, ".devbox");
 }
 
 async function readJson(filePath: string): Promise<any> {
