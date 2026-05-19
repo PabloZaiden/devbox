@@ -386,7 +386,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(await readFile(String(fixture.sourceConfigPath), "utf8")).toBe(sourceBefore);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
-    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
+    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
     expect(generatedConfig.features).toEqual({
       "ghcr.io/devcontainers/features/docker-in-docker:3": {},
     });
