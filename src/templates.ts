@@ -28,7 +28,7 @@ export interface DevboxTemplateSummary {
 
 const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:noble";
 const BASE_NAME = "noble";
-const DOCKER_IN_DOCKER_FEATURE = "ghcr.io/devcontainers/features/docker-in-docker:2";
+const DOCKER_IN_DOCKER_FEATURE = "ghcr.io/devcontainers/features/docker-in-docker:3";
 const DOTNET_FEATURE = "ghcr.io/devcontainers/features/dotnet:2";
 const GO_FEATURE = "ghcr.io/devcontainers/features/go:1";
 const JAVA_FEATURE = "ghcr.io/devcontainers/features/java:1";

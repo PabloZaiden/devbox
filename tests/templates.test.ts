@@ -11,7 +11,7 @@ describe("built-in templates", () => {
         expect.objectContaining({
           image: "mcr.microsoft.com/devcontainers/base:noble",
           features: expect.objectContaining({
-            "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+            "ghcr.io/devcontainers/features/docker-in-docker:3": {},
           }),
         }),
       );
@@ -29,13 +29,13 @@ describe("built-in templates", () => {
     expect(template.base).toBe("noble");
     expect(template.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
     expect(template.pinnedReference).toBe(
-      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:2 + ghcr.io/devcontainers/features/node:1 + ghcr.io/devcontainers-extra/features/bun:1",
+      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:3 + ghcr.io/devcontainers/features/node:1 + ghcr.io/devcontainers-extra/features/bun:1",
     );
     expect(template.runnerCompatible).toBe(true);
     expect(template.config).toEqual({
       image: "mcr.microsoft.com/devcontainers/base:noble",
       features: {
-        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+        "ghcr.io/devcontainers/features/docker-in-docker:3": {},
         "ghcr.io/devcontainers/features/node:1": {},
         "ghcr.io/devcontainers-extra/features/bun:1": {},
       },
@@ -51,7 +51,7 @@ describe("built-in templates", () => {
       base: "noble",
       image: "mcr.microsoft.com/devcontainers/base:noble",
       pinnedReference:
-        "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:2 + ghcr.io/devcontainers/features/node:1 + ghcr.io/devcontainers-extra/features/bun:1",
+        "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:3 + ghcr.io/devcontainers/features/node:1 + ghcr.io/devcontainers-extra/features/bun:1",
       runtimeVersion: "Node.js + Bun",
       languages: ["node", "bun", "typescript", "javascript"],
       runnerCompatible: true,

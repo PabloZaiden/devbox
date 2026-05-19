@@ -436,7 +436,7 @@ describe("resolveWorkspaceConfig", () => {
     expect(rebuildStyleResolution.config).toEqual({
       image: "mcr.microsoft.com/devcontainers/base:noble",
       features: {
-        "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+        "ghcr.io/devcontainers/features/docker-in-docker:3": {},
         "ghcr.io/devcontainers-extra/features/uv:1": {},
       },
     });
