@@ -388,7 +388,7 @@ describe("example workspaces (simulated host tools)", () => {
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:ubuntu");
     expect(generatedConfig.features).toEqual({
-      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+      "ghcr.io/devcontainers/features/docker-in-docker:3": {},
     });
     expect(generatedConfig.runArgs).toEqual(["--name", "devbox-smoke-workspace-5001", "-p", "5001:5001"]);
     expect(generatedConfig.mounts).toEqual([]);
@@ -485,7 +485,7 @@ describe("example workspaces (simulated host tools)", () => {
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.features).toEqual({
       "ghcr.io/devcontainers/features/azure-cli:1": {},
-      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+      "ghcr.io/devcontainers/features/docker-in-docker:3": {},
       "ghcr.io/devcontainers/features/node:1": {},
       "ghcr.io/devcontainers/features/terraform:1": {},
     });
@@ -544,7 +544,7 @@ describe("example workspaces (simulated host tools)", () => {
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
     expect(generatedConfig.features).toEqual({
-      "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+      "ghcr.io/devcontainers/features/docker-in-docker:3": {},
     });
     expect(generatedConfig.postCreateCommand).toBeUndefined();
 
@@ -554,7 +554,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(state.template.name).toBe("ubuntu");
     expect(state.template.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
     expect(state.template.pinnedReference).toBe(
-      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:2",
+      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:3",
     );
     expect(state.template.runtimeVersion).toBe("Ubuntu noble");
 
