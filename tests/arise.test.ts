@@ -171,12 +171,13 @@ describe("inspectWorkspaceRestartReadiness", () => {
   test("accepts workspaces with persisted devbox leftovers", async () => {
     const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-arise-"));
     tempPaths.push(workspacePath);
-    await writeFile(path.join(workspacePath, ".sshcred"), "password\n", "utf8");
+    await mkdir(path.join(workspacePath, ".devbox", "ssh"), { recursive: true });
+    await writeFile(path.join(workspacePath, ".devbox", "ssh", "credentials"), "password\n", "utf8");
 
     const readiness = await inspectWorkspaceRestartReadiness(workspacePath);
 
     expect(readiness.eligible).toBe(true);
-    expect(readiness.foundArtifacts).toEqual([".sshcred"]);
+    expect(readiness.foundArtifacts).toEqual([".devbox/ssh/credentials"]);
     expect(readiness.reasons).toEqual([]);
     expect(readiness.hasCredentialFile).toBe(true);
   });
@@ -184,12 +185,12 @@ describe("inspectWorkspaceRestartReadiness", () => {
   test("accepts workspaces with saved state or host key leftovers", async () => {
     const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-arise-"));
     tempPaths.push(workspacePath);
-    await mkdir(path.join(workspacePath, ".devbox-ssh-host-keys"));
+    await mkdir(path.join(workspacePath, ".devbox", "ssh", "host-keys"), { recursive: true });
 
     const readiness = await inspectWorkspaceRestartReadiness(workspacePath);
 
     expect(readiness.eligible).toBe(true);
-    expect(readiness.foundArtifacts).toEqual([".devbox-ssh-host-keys/"]);
+    expect(readiness.foundArtifacts).toEqual([".devbox/ssh/host-keys/"]);
     expect(readiness.hasHostKeysDir).toBe(true);
   });
 
@@ -311,7 +312,7 @@ describe("ariseManagedWorkspaces", () => {
           eligible: true,
           workspacePath,
           reasons: [],
-          foundArtifacts: workspacePath === "/tmp/ok" ? [".sshcred"] : ["saved state"],
+          foundArtifacts: workspacePath === "/tmp/ok" ? [".devbox/ssh/credentials"] : ["saved state"],
           statePath: "/tmp/state",
           credentialPath: "/tmp/cred",
           sshMetadataPath: "/tmp/meta",

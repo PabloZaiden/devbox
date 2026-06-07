@@ -415,7 +415,7 @@ describe("example workspaces (simulated host tools)", () => {
 
     const excludeContent = await readFile(path.join(fixture.workspacePath, ".git", "info", "exclude"), "utf8");
     expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
-    expect(excludeContent).toContain("/.devbox-ssh.json");
+    expect(excludeContent).toContain("/.devbox");
 
     const shell = runCli(fixture, ["shell"]);
     expect(shell.exitCode).toBe(0);

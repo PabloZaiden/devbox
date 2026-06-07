@@ -18,7 +18,7 @@ if [ -n "${SSH_AUTH_SOCK:-}" ]; then
   echo "export SSH_AUTH_SOCK=\"${SSH_AUTH_SOCK}\"" >> ~/.zshenv  
 fi
 
-CRED_FILE="${CRED_FILE:-.sshcred}"
+CRED_FILE="${CRED_FILE:-.devbox/ssh/credentials}"
 SSH_PORT="${SSH_PORT:-5001}"
 
 as_root() {
@@ -147,6 +147,7 @@ if [[ -f "$CRED_FILE" ]]; then
 else
   PASS="$(uuidgen | tr "[:upper:]" "[:lower:]")"
   umask 077
+  mkdir -p "$(dirname "$CRED_FILE")"
   printf '%s' "$PASS" > "$CRED_FILE"
 fi
 

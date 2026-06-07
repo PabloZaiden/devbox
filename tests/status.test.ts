@@ -83,10 +83,10 @@ describe("getDevboxStatus", () => {
         listManagedContainers: async () => containers.map((container) => container.Id),
         inspectContainers: async () => containers,
         readFile: async (filePath) => {
-          if (filePath === "/tmp/ws/.sshcred") {
+          if (filePath === "/tmp/ws/.devbox/ssh/credentials") {
             return "secret\n";
           }
-          if (filePath === "/tmp/ws/.devbox-ssh.json") {
+          if (filePath === "/tmp/ws/.devbox/ssh/metadata.json") {
             return serializeRunnerMetadata(
               createRunnerMetadata({
                 sshUser: "vscode",
@@ -136,10 +136,10 @@ describe("getDevboxStatus", () => {
         listManagedContainers: async () => [],
         inspectContainers: async () => [],
         readFile: async (filePath) => {
-          if (filePath === "/tmp/no-state/.sshcred") {
+          if (filePath === "/tmp/no-state/.devbox/ssh/credentials") {
             return "password\n";
           }
-          if (filePath === "/tmp/no-state/.devbox-ssh.json") {
+          if (filePath === "/tmp/no-state/.devbox/ssh/metadata.json") {
             return serializeRunnerMetadata(
               createRunnerMetadata({
                 sshUser: "root",
@@ -327,7 +327,7 @@ describe("getDevboxStatus", () => {
           },
         ],
         readFile: async (filePath) => {
-          if (filePath === "/tmp/password-only/.sshcred") {
+          if (filePath === "/tmp/password-only/.devbox/ssh/credentials") {
             return "password\n";
           }
           if (filePath === "/tmp/password-only/.devcontainer/devcontainer.json") {
@@ -346,7 +346,7 @@ describe("getDevboxStatus", () => {
     expect(status.permitRootLogin).toBeNull();
     expect(status.hasSshMetadataFile).toBe(false);
     expect(status.warnings).toContain(
-      "Devbox SSH metadata file was not found: /tmp/password-only/.devbox-ssh.json. `sshUser` and `permitRootLogin` are unavailable. Start the workspace again with this devbox version to persist them.",
+      "Devbox SSH metadata file was not found: /tmp/password-only/.devbox/ssh/metadata.json. `sshUser` and `permitRootLogin` are unavailable. Start the workspace again with this devbox version to persist them.",
     );
     expect(status.warnings).toContain(
       "`remoteUser` is unavailable because the devcontainer config does not set `remoteUser` or `containerUser`.",
@@ -416,10 +416,10 @@ describe("getDevboxStatus", () => {
           throw new Error("inspectContainers should not be called when docker is unavailable");
         },
         readFile: async (filePath) => {
-          if (filePath === "/tmp/docker-missing/.sshcred") {
+          if (filePath === "/tmp/docker-missing/.devbox/ssh/credentials") {
             return "password\n";
           }
-          if (filePath === "/tmp/docker-missing/.devbox-ssh.json") {
+          if (filePath === "/tmp/docker-missing/.devbox/ssh/metadata.json") {
             return serializeRunnerMetadata(
               createRunnerMetadata({
                 sshUser: "root",

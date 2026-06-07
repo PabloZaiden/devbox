@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { realpath, writeFile } from "node:fs/promises";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildManagedConfig,
@@ -11,6 +11,7 @@ import {
   getManagedPortFromContainerName,
   getManagedLabels,
   prepareKnownHostsMount,
+  getWorkspaceSshMetadataFile,
   getWorkspaceStateDir,
   getWorkspaceUserDataDir,
   hashWorkspacePath,
@@ -57,11 +58,8 @@ import {
 } from "./runtime";
 import {
   DEFAULT_UP_AUTO_PORT_START,
-  DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   MANAGED_LABEL_KEY,
-  RUNNER_CRED_FILENAME,
-  RUNNER_HOST_KEYS_DIRNAME,
 } from "./constants";
 import { createRunnerMetadata, serializeRunnerMetadata } from "./runnerState";
 import { getDevboxStatus } from "./status";
@@ -249,10 +247,7 @@ async function handleUpLike(
   const remoteWorkspaceFolder = upResult.remoteWorkspaceFolder ?? getDefaultRemoteWorkspaceFolder(workspacePath);
 
   console.log("Configuring SSH access inside the devcontainer...");
-  await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME));
-  const runnerMetadataPath = path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME);
-  await ensurePathIgnored(workspacePath, runnerMetadataPath);
-  await ensurePathIgnored(workspacePath, path.join(workspacePath, RUNNER_CRED_FILENAME));
+  const runnerMetadataPath = getWorkspaceSshMetadataFile(workspacePath);
   if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
     console.log("Making the forwarded SSH agent socket accessible to the container user...");
     await ensureSshAuthSockAccessible(upResult.containerId, environment.sshAuthSock);
@@ -286,6 +281,7 @@ async function handleUpLike(
     console.log("Installing SSH public key for key-based login...");
     await configureAuthorizedKeys(upResult.containerId, sshUser, resolvedSshPublicKey.publicKey);
   }
+  await mkdir(path.dirname(runnerMetadataPath), { recursive: true });
   await writeFile(
     runnerMetadataPath,
     serializeRunnerMetadata(

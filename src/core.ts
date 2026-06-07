@@ -9,10 +9,14 @@ import pkg from "../package.json";
 import {
   CLI_NAME,
   DEFAULT_UP_AUTO_PORT_START,
+  DEVBOX_SSH_DIRNAME,
+  DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   KNOWN_HOSTS_SNAPSHOT_FILENAME,
   LEGACY_GENERATED_CONFIG_BASENAME,
   MANAGED_LABEL_KEY,
+  RUNNER_CRED_FILENAME,
+  RUNNER_HOST_KEYS_DIRNAME,
   SSH_AUTH_SOCK_TARGET,
   STATE_VERSION,
   WORKSPACE_LABEL_KEY,
@@ -406,6 +410,22 @@ export function getWorkspaceStateFile(workspacePath: string): string {
 
 export function getWorkspaceUserDataDir(workspacePath: string): string {
   return path.join(getWorkspaceStateDir(workspacePath), "user-data");
+}
+
+export function getWorkspaceSshDir(workspacePath: string): string {
+  return path.join(getWorkspaceStateDir(workspacePath), DEVBOX_SSH_DIRNAME);
+}
+
+export function getWorkspaceRunnerCredentialFile(workspacePath: string): string {
+  return path.join(getWorkspaceSshDir(workspacePath), RUNNER_CRED_FILENAME);
+}
+
+export function getWorkspaceSshMetadataFile(workspacePath: string): string {
+  return path.join(getWorkspaceSshDir(workspacePath), DEVBOX_SSH_METADATA_FILENAME);
+}
+
+export function getWorkspaceRunnerHostKeysDir(workspacePath: string): string {
+  return path.join(getWorkspaceSshDir(workspacePath), RUNNER_HOST_KEYS_DIRNAME);
 }
 
 export function getTemplateGeneratedConfigPath(workspacePath: string): string {

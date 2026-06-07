@@ -15,7 +15,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Exposes the SSH service on the chosen host port and, when a host public key is available, installs it for key-based SSH login inside the devcontainer.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
 - Runs devbox's bundled SSH server setup script inside the devcontainer.
-- Stores devbox-owned state in the workspace-local `.devbox/` directory, and persists the runner password as `.sshcred`, SSH metadata in `.devbox-ssh.json`, and SSH host keys in `.devbox-ssh-host-keys/`, so they survive `down` / `rebuild`.
+- Stores devbox-owned state, SSH credentials, SSH metadata, and SSH host keys under the workspace-local `.devbox/` directory so they survive `down` / `rebuild`.
 
 ## Installation
 
@@ -193,15 +193,15 @@ The complex example uses several devcontainer features, so the first `up` or `re
 
 - When `devbox` uses a repo devcontainer, the generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - When `devbox` uses `--template`, it writes the generated config to `.devbox/.devcontainer.json` instead of creating a source devcontainer definition inside the repo.
-- `.devbox/` contains devbox-owned local state (`state.json`, `user-data/`, and template generated configs) and should stay ignored by version control.
+- `.devbox/` contains all devbox-owned local state (`state.json`, `user-data/`, template generated configs, and `ssh/`) and should stay ignored by version control.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `--template <name>` explicitly chooses a built-in template, even if the repo already has a devcontainer definition.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
-- `devbox status` reports live container state when available and falls back to saved workspace state in `.devbox/state.json` plus the persisted `.sshcred` password file and `.devbox-ssh.json` metadata when the container is stopped or Docker is unavailable.
-- `devbox arise` only attempts workspaces it can recover from stopped managed containers and that still have at least one persisted devbox leftover, such as saved state, `.sshcred`, `.devbox-ssh.json`, or `.devbox-ssh-host-keys/`.
+- `devbox status` reports live container state when available and falls back to saved workspace state in `.devbox/state.json` plus the persisted `.devbox/ssh/credentials` password file and `.devbox/ssh/metadata.json` metadata when the container is stopped or Docker is unavailable.
+- `devbox arise` only attempts workspaces it can recover from stopped managed containers and that still have at least one persisted devbox leftover, such as saved state, `.devbox/ssh/credentials`, `.devbox/ssh/metadata.json`, or `.devbox/ssh/host-keys/`.
 - For workspaces that pass the restart-readiness checks and are actually attempted, if there is more than one stopped managed container, `devbox arise` keeps the newest stopped container as the source of truth, removes the older stopped duplicates, and then reruns `devbox up`. Skipped or unrecoverable workspaces may retain older stopped duplicates.
 - `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
-- `down` removes managed containers but keeps `.devbox/` plus the workspace `.sshcred`, `.devbox-ssh.json`, and `.devbox-ssh-host-keys/`, so rebuilds can reuse the last selected port/config source/template.
+- `down` removes managed containers but keeps `.devbox/`, so rebuilds can reuse the last selected port/config source/template and SSH artifacts.
 - Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.

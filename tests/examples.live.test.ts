@@ -5,15 +5,21 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
-  DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   MANAGED_LABEL_KEY,
-  RUNNER_CRED_FILENAME,
-  RUNNER_HOST_KEYS_DIRNAME,
   SSH_AUTH_SOCK_TARGET,
   WORKSPACE_LABEL_KEY,
 } from "../src/constants";
-import { getDefaultRemoteWorkspaceFolder, getManagedContainerName, hashWorkspacePath, quoteShell, type DockerInspect } from "../src/core";
+import {
+  getDefaultRemoteWorkspaceFolder,
+  getManagedContainerName,
+  getWorkspaceRunnerCredentialFile,
+  getWorkspaceRunnerHostKeysDir,
+  getWorkspaceSshMetadataFile,
+  hashWorkspacePath,
+  quoteShell,
+  type DockerInspect,
+} from "../src/core";
 
 setDefaultTimeout(15 * 60_000);
 
@@ -158,14 +164,12 @@ describe("example workspaces (real devcontainers)", () => {
       );
       expect(featureChecks.exitCode).toBe(0);
 
-      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(true);
 
       const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
       expect(runnerCredContent.trim().length).toBeGreaterThan(0);
       const runnerMetadata = await readJson(fixture.runnerMetadataPath);
-      expect(runnerMetadata.sshUser).toBe("root");
-      expect(runnerMetadata.sshPort).toBe(fixture.port);
-      expect(runnerMetadata.permitRootLogin).toBe(true);
+      expectRunnerMetadata(runnerMetadata, fixture.port);
 
       const down = runCli(fixture, ["down"]);
       expect(down.exitCode).toBe(0);
@@ -173,7 +177,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(await listManagedContainerIds(fixture)).toEqual([]);
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
-      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(true);
       expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 8 * 60_000 },
@@ -229,7 +233,7 @@ describe("example workspaces (real devcontainers)", () => {
       );
       expect(featureChecks.exitCode).toBe(0);
 
-      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(true);
 
       const ghTokenInContainer = execInContainer(fixture, firstContainerId, 'printf "%s" "${GH_TOKEN:-}"');
       expect(ghTokenInContainer.stdout).toBe("ghs_live_example_token");
@@ -257,9 +261,7 @@ describe("example workspaces (real devcontainers)", () => {
       const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
       expect(runnerCredContent.trim().length).toBeGreaterThan(0);
       const runnerMetadata = await readJson(fixture.runnerMetadataPath);
-      expect(runnerMetadata.sshUser).toBe("root");
-      expect(runnerMetadata.sshPort).toBe(fixture.port);
-      expect(runnerMetadata.permitRootLogin).toBe(true);
+      expectRunnerMetadata(runnerMetadata, fixture.port);
 
       const rebuild = runCli(fixture, ["rebuild"]);
       expect(rebuild.exitCode).toBe(0);
@@ -277,9 +279,8 @@ describe("example workspaces (real devcontainers)", () => {
       expect(down.exitCode).toBe(0);
       expect(down.stdout).toContain("Removed 1 managed container(s).");
       expect(await listManagedContainerIds(fixture)).toEqual([]);
-      expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
-      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(true);
       expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 12 * 60_000 },
@@ -306,9 +307,8 @@ describe("example workspaces (real devcontainers)", () => {
 
       const stoppedInspect = inspectContainer(fixture, initialContainerId);
       expect(stoppedInspect.State?.Running).toBe(false);
-      expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
-      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(true);
 
       const arise = runCommand([process.execPath, "run", cliPath, "arise"], {
         cwd: repoRoot,
@@ -334,7 +334,7 @@ describe("example workspaces (real devcontainers)", () => {
             mount.Destination === fixture.remoteWorkspaceFolder,
         ),
       ).toBe(true);
-      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(true);
 
       const sample = execInContainer(
         fixture,
@@ -400,6 +400,10 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
   env.HOME = homeDir;
   env.PATH = `${wrappersDir}${path.delimiter}${env.PATH}`;
   env.SSH_AUTH_SOCK = sshAuthSockPath ?? "";
+  const dockerConfig = resolveHostDockerConfig();
+  if (dockerConfig) {
+    env.DOCKER_CONFIG = dockerConfig;
+  }
 
   const fixture: LiveFixture = {
     env,
@@ -412,8 +416,8 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
     runnerArtifacts: {
       knownHosts: path.join(workspacePath, ".devbox-test-known-hosts"),
     },
-    runnerCredPath: path.join(workspacePath, RUNNER_CRED_FILENAME),
-    runnerMetadataPath: path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME),
+    runnerCredPath: getWorkspaceRunnerCredentialFile(workspacePath),
+    runnerMetadataPath: getWorkspaceSshMetadataFile(workspacePath),
     sampleFilePath: path.join(workspacePath, "sample-file.txt"),
     sshAuthSockPath,
     statePath: getStatePath(workspacePath),
@@ -531,11 +535,13 @@ function runCommand(
 }
 
 function canRunLivePrerequisites(): boolean {
-  return canRunCommand(["docker", "info"]) && canRunCommand(["devcontainer", "--version"]);
+  return canRunCommand(["docker", "info"]) && canRunCommand(["docker", "ps", "-q"]) && canRunCommand(["devcontainer", "--version"]);
 }
 
 function canRunAriseLivePrerequisites(): boolean {
-  return canRunCommand(["docker", "info"]) && (canRunCommand(["devcontainer", "--version"]) || resolveFallbackDevcontainerImage("smoke-workspace") !== null);
+  return canRunCommand(["docker", "info"]) &&
+    canRunCommand(["docker", "ps", "-q"]) &&
+    (canRunCommand(["devcontainer", "--version"]) || resolveFallbackDevcontainerImage("smoke-workspace") !== null);
 }
 
 function isDockerDesktopHost(): boolean {
@@ -602,8 +608,8 @@ function resolveFallbackDevcontainerImage(exampleName: string): string | null {
 }
 
 async function resetWorkspaceArtifacts(workspacePath: string): Promise<void> {
-  await rm(path.join(workspacePath, RUNNER_CRED_FILENAME), { force: true });
-  await rm(path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME), { force: true, recursive: true });
+  await rm(getWorkspaceRunnerCredentialFile(workspacePath), { force: true });
+  await rm(getWorkspaceRunnerHostKeysDir(workspacePath), { force: true, recursive: true });
   await rm(path.join(workspacePath, ".devcontainer", ".devcontainer.json"), { force: true });
 }
 
@@ -925,6 +931,27 @@ function findExecutable(command: string): string | null {
   return null;
 }
 
+function resolveHostDockerConfig(): string | null {
+  if (process.env.DOCKER_CONFIG && existsSync(process.env.DOCKER_CONFIG)) {
+    return process.env.DOCKER_CONFIG;
+  }
+
+  const home = process.env.HOME;
+  if (!home) {
+    return null;
+  }
+
+  const dockerConfig = path.join(home, ".docker");
+  return existsSync(dockerConfig) ? dockerConfig : null;
+}
+
 async function readJson(filePath: string): Promise<any> {
   return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+function expectRunnerMetadata(metadata: any, port: number): void {
+  expect(typeof metadata.sshUser).toBe("string");
+  expect(metadata.sshUser.length).toBeGreaterThan(0);
+  expect(metadata.sshPort).toBe(port);
+  expect(metadata.permitRootLogin).toBe(metadata.sshUser === "root");
 }

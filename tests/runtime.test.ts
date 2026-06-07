@@ -550,7 +550,7 @@ describe("ensurePathIgnored", () => {
     expect(excludeContent).toContain("/.devcontainer/.devcontainer.json");
   });
 
-  test("locally ignores .sshcred when workspace is inside a git repo", async () => {
+  test("locally ignores .devbox when workspace is inside a git repo", async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-runtime-test-"));
     tempPaths.push(tempDir);
     const repoDir = path.join(tempDir, "repo");
@@ -562,7 +562,8 @@ describe("ensurePathIgnored", () => {
     run(["git", "-C", repoDir, "add", "README.md"]);
     run(["git", "-C", repoDir, "commit", "-m", "init"]);
 
-    const credFilePath = path.join(repoDir, ".sshcred");
+    const credFilePath = path.join(repoDir, ".devbox", "ssh", "credentials");
+    await mkdir(path.dirname(credFilePath), { recursive: true });
     await writeFile(credFilePath, "user=devbox\npassword=secret\n", "utf8");
     await ensurePathIgnored(repoDir, credFilePath);
 
@@ -573,16 +574,16 @@ describe("ensurePathIgnored", () => {
     expect(excludePathResult.exitCode).toBe(0);
     const excludePath = Buffer.from(excludePathResult.stdout).toString("utf8").trim();
     const excludeContent = await readFile(excludePath, "utf8");
-    expect(excludeContent).toContain("/.sshcred");
+    expect(excludeContent).toContain("/.devbox");
 
-    // Verify .sshcred is ignored by git (does not appear in git status output)
+    // Verify .devbox is ignored by git (does not appear in git status output)
     const statusResult = Bun.spawnSync(["git", "-C", repoDir, "status", "--porcelain"], {
       stdout: "pipe",
       stderr: "pipe",
     });
     expect(statusResult.exitCode).toBe(0);
     const statusOutput = Buffer.from(statusResult.stdout).toString("utf8");
-    expect(statusOutput).not.toContain(".sshcred");
+    expect(statusOutput).not.toContain(".devbox");
   });
 });
 
@@ -647,10 +648,10 @@ describe("redactSensitiveOutput", () => {
 describe("getRunnerCredFile", () => {
   test("stores runner credentials on the mounted workspace", () => {
     expect(getRunnerCredFile("/workspaces/example-project")).toBe(
-      "/workspaces/example-project/.sshcred",
+      "/workspaces/example-project/.devbox/ssh/credentials",
     );
     expect(getRunnerCredFile("/workspaces/example-project/")).toBe(
-      "/workspaces/example-project/.sshcred",
+      "/workspaces/example-project/.devbox/ssh/credentials",
     );
   });
 });
@@ -659,7 +660,7 @@ describe("buildStartRunnerScript", () => {
   test("runs the bundled runner from stdin without downloading an external script", () => {
     const script = buildStartRunnerScript(5001, "/workspaces/example-project");
 
-    expect(script).toBe("env SSH_PORT='5001' CRED_FILE='/workspaces/example-project/.sshcred' bash -s");
+    expect(script).toBe("env SSH_PORT='5001' CRED_FILE='/workspaces/example-project/.devbox/ssh/credentials' bash -s");
     expect(script).not.toContain("curl");
     expect(script).not.toContain("http");
   });
@@ -678,7 +679,7 @@ describe("isDockerRootlessSecurityOptions", () => {
 describe("getRunnerHostKeysDir", () => {
   test("stores host keys on the mounted workspace", () => {
     expect(getRunnerHostKeysDir("/workspaces/example-project")).toBe(
-      "/workspaces/example-project/.devbox-ssh-host-keys",
+      "/workspaces/example-project/.devbox/ssh/host-keys",
     );
   });
 });
@@ -686,16 +687,16 @@ describe("getRunnerHostKeysDir", () => {
 describe("runner host key scripts", () => {
   test("restores host keys from the mounted workspace", () => {
     const script = buildRestoreRunnerHostKeysScript("/workspaces/example-project");
-    expect(script).toContain("/workspaces/example-project/.devbox-ssh-host-keys");
-    expect(script).toContain("find '/workspaces/example-project/.devbox-ssh-host-keys'");
+    expect(script).toContain("/workspaces/example-project/.devbox/ssh/host-keys");
+    expect(script).toContain("find '/workspaces/example-project/.devbox/ssh/host-keys'");
     expect(script).toContain("cp {} /etc/ssh/");
   });
 
   test("persists host keys back to the mounted workspace", () => {
     const script = buildPersistRunnerHostKeysScript("/workspaces/example-project");
-    expect(script).toContain("mkdir -p '/workspaces/example-project/.devbox-ssh-host-keys'");
+    expect(script).toContain("mkdir -p '/workspaces/example-project/.devbox/ssh/host-keys'");
     expect(script).toContain("find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*'");
-    expect(script).toContain("cp {} '/workspaces/example-project/.devbox-ssh-host-keys'/");
+    expect(script).toContain("cp {} '/workspaces/example-project/.devbox/ssh/host-keys'/");
   });
 });
 

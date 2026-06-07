@@ -14,6 +14,7 @@ import {
 } from "./core";
 import {
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
+  DEVBOX_SSH_DIRNAME,
   KNOWN_HOSTS_TARGET,
   MANAGED_LABEL_KEY,
   RUNNER_CRED_FILENAME,
@@ -113,10 +114,7 @@ export function buildStopManagedSshdScript(port: number): string {
 }
 
 export function getRunnerCredFile(remoteWorkspaceFolder: string): string {
-  const trimmed = remoteWorkspaceFolder.endsWith("/")
-    ? remoteWorkspaceFolder.slice(0, -1)
-    : remoteWorkspaceFolder;
-  return `${trimmed}/${RUNNER_CRED_FILENAME}`;
+  return `${getRemoteWorkspaceSshDir(remoteWorkspaceFolder)}/${RUNNER_CRED_FILENAME}`;
 }
 
 export function getRunnerSummaryLines(output: string): string[] {
@@ -309,10 +307,14 @@ export function buildInteractiveShellScript(): string {
 }
 
 export function getRunnerHostKeysDir(remoteWorkspaceFolder: string): string {
+  return `${getRemoteWorkspaceSshDir(remoteWorkspaceFolder)}/${RUNNER_HOST_KEYS_DIRNAME}`;
+}
+
+function getRemoteWorkspaceSshDir(remoteWorkspaceFolder: string): string {
   const trimmed = remoteWorkspaceFolder.endsWith("/")
     ? remoteWorkspaceFolder.slice(0, -1)
     : remoteWorkspaceFolder;
-  return `${trimmed}/${RUNNER_HOST_KEYS_DIRNAME}`;
+  return `${trimmed}/.devbox/${DEVBOX_SSH_DIRNAME}`;
 }
 
 export function buildRestoreRunnerHostKeysScript(remoteWorkspaceFolder: string): string {
