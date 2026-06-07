@@ -562,10 +562,11 @@ describe("ensurePathIgnored", () => {
     run(["git", "-C", repoDir, "add", "README.md"]);
     run(["git", "-C", repoDir, "commit", "-m", "init"]);
 
-    const credFilePath = path.join(repoDir, ".devbox", "ssh", "credentials");
+    const devboxDir = path.join(repoDir, ".devbox");
+    const credFilePath = path.join(devboxDir, "ssh", "credentials");
     await mkdir(path.dirname(credFilePath), { recursive: true });
     await writeFile(credFilePath, "user=devbox\npassword=secret\n", "utf8");
-    await ensurePathIgnored(repoDir, credFilePath);
+    await ensurePathIgnored(repoDir, devboxDir);
 
     const excludePathResult = Bun.spawnSync(
       ["git", "-C", repoDir, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],

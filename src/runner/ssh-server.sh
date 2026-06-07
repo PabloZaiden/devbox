@@ -12,10 +12,22 @@ if [ -n "${VSCODE_SSH_AUTH_SOCK}" ]; then
   export SSH_AUTH_SOCK=${VSCODE_SSH_AUTH_SOCK}
 fi
 
+append_unique_line() {
+  local file="$1"
+  local line="$2"
+
+  mkdir -p "$(dirname "$file")"
+  touch "$file"
+  if ! grep -qxF "$line" "$file"; then
+    printf '%s\n' "$line" >> "$file"
+  fi
+}
+
 if [ -n "${SSH_AUTH_SOCK:-}" ]; then
-  echo "export SSH_AUTH_SOCK=\"${SSH_AUTH_SOCK}\"" >> ~/.profile
-  echo "export SSH_AUTH_SOCK=\"${SSH_AUTH_SOCK}\"" >> ~/.bashrc
-  echo "export SSH_AUTH_SOCK=\"${SSH_AUTH_SOCK}\"" >> ~/.zshenv  
+  ssh_auth_sock_export="export SSH_AUTH_SOCK=\"${SSH_AUTH_SOCK}\""
+  append_unique_line "$HOME/.profile" "$ssh_auth_sock_export"
+  append_unique_line "$HOME/.bashrc" "$ssh_auth_sock_export"
+  append_unique_line "$HOME/.zshenv" "$ssh_auth_sock_export"
 fi
 
 CRED_FILE="${CRED_FILE:-.devbox/ssh/credentials}"
@@ -27,12 +39,12 @@ as_root() {
     return
   fi
 
-  if command -v sudo >/dev/null 2>&1; then
-    sudo -n "$@" 2>/dev/null || sudo "$@"
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo -n "$@"
     return
   fi
 
-  echo "ERROR: need root privileges (run as root or install/configure sudo)" >&2
+  echo "ERROR: need root privileges (run as root or configure passwordless sudo)" >&2
   exit 1
 }
 
@@ -44,12 +56,12 @@ as_root_bash() {
     return
   fi
 
-  if command -v sudo >/dev/null 2>&1; then
-    sudo -n bash -lc "$cmd" 2>/dev/null || sudo bash -lc "$cmd"
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    sudo -n bash -lc "$cmd"
     return
   fi
 
-  echo "ERROR: need root privileges (run as root or install/configure sudo)" >&2
+  echo "ERROR: need root privileges (run as root or configure passwordless sudo)" >&2
   exit 1
 }
 
@@ -139,7 +151,7 @@ minimumReleaseAge = 259200" > "$HOME/.bunfig.toml"
 
 # Use existing password if present, otherwise create it once
 if [[ -f "$CRED_FILE" ]]; then
-  PASS="$(cat "$CRED_FILE")"
+  PASS="$(tr -d '\r\n' < "$CRED_FILE")"
   if [[ -z "${PASS}" ]]; then
     echo "ERROR: ${CRED_FILE} exists but is empty" >&2
     exit 1
