@@ -88,9 +88,6 @@ mkdir -p /var/run/sshd
 mkdir -p /etc/ssh/sshd_config.d
 '
 
-# install fresh editor
-curl https://raw.githubusercontent.com/sinelaw/fresh/refs/heads/master/scripts/install.sh | sh
-
 # install GitHub CLI if missing
 if command -v gh >/dev/null 2>&1; then
   echo "GitHub CLI already installed; skipping."
@@ -131,6 +128,9 @@ else
 fi
 node -v
 npm -v
+
+# install fresh editor
+npm install -g @fresh-editor/fresh-editor
 
 # set $HOME/.npmrc and $HOME/.bunfig.toml to have minimum release date to 3 days
 echo "min-release-age=3" > "$HOME/.npmrc"
