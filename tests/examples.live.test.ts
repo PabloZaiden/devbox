@@ -46,14 +46,7 @@ interface LiveFixtureOptions {
 }
 
 interface RunnerArtifacts {
-  ghToken: string;
-  gitUserEmail: string;
-  gitUserName: string;
-  hostKey: string;
-  hostKeyPub: string;
   knownHosts: string;
-  runnerInvocations: string;
-  sshAuthSock: string;
 }
 
 interface LiveFixture {
@@ -65,7 +58,6 @@ interface LiveFixture {
   runnerArtifacts: RunnerArtifacts;
   runnerCredPath: string;
   runnerMetadataPath: string;
-  runnerHostKeyMarker: string;
   sampleFilePath: string;
   sshAuthSockPath: string | null;
   statePath: string;
@@ -166,16 +158,10 @@ describe("example workspaces (real devcontainers)", () => {
       );
       expect(featureChecks.exitCode).toBe(0);
 
-      expect(await readTrimmedFile(fixture.runnerArtifacts.sshAuthSock)).toBe("missing");
-      expect(existsSync(fixture.runnerArtifacts.ghToken)).toBe(false);
-      expect(existsSync(fixture.runnerArtifacts.gitUserName)).toBe(false);
-      expect(existsSync(fixture.runnerArtifacts.gitUserEmail)).toBe(false);
-      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
-      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKeyPub)).toBe(`${fixture.runnerHostKeyMarker}.pub`);
-      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([String(fixture.port)]);
+      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
 
       const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
-      expect(runnerCredContent.trim()).toBe("password");
+      expect(runnerCredContent.trim().length).toBeGreaterThan(0);
       const runnerMetadata = await readJson(fixture.runnerMetadataPath);
       expect(runnerMetadata.sshUser).toBe("root");
       expect(runnerMetadata.sshPort).toBe(fixture.port);
@@ -187,7 +173,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(await listManagedContainerIds(fixture)).toEqual([]);
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
-      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
+      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
       expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 8 * 60_000 },
@@ -243,13 +229,7 @@ describe("example workspaces (real devcontainers)", () => {
       );
       expect(featureChecks.exitCode).toBe(0);
 
-      expect(await readTrimmedFile(fixture.runnerArtifacts.ghToken)).toBe("ghs_live_example_token");
-      expect(await readTrimmedFile(fixture.runnerArtifacts.gitUserName)).toBe("Example Author");
-      expect(await readTrimmedFile(fixture.runnerArtifacts.gitUserEmail)).toBe("example@author.test");
-      expect(await readTrimmedFile(fixture.runnerArtifacts.sshAuthSock)).toBe(fixture.expectedContainerSshAuthSockPath);
-      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
-      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKeyPub)).toBe(`${fixture.runnerHostKeyMarker}.pub`);
-      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([String(fixture.port)]);
+      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
 
       const ghTokenInContainer = execInContainer(fixture, firstContainerId, 'printf "%s" "${GH_TOKEN:-}"');
       expect(ghTokenInContainer.stdout).toBe("ghs_live_example_token");
@@ -271,11 +251,11 @@ describe("example workspaces (real devcontainers)", () => {
       expect(sshAuthSockInContainer.exitCode).toBe(0);
       expect(sshAuthSockInContainer.stdout).toBe(fixture.expectedContainerSshAuthSockPath);
 
-      const hostKeyInContainer = execInContainerAsRoot(fixture, firstContainerId, "cat /etc/ssh/ssh_host_devbox_test_key");
-      expect(hostKeyInContainer.stdout.trim()).toBe(fixture.runnerHostKeyMarker);
+      const hostKeyInContainer = execInContainerAsRoot(fixture, firstContainerId, "find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key' | head -n 1");
+      expect(hostKeyInContainer.stdout.trim().length).toBeGreaterThan(0);
 
       const runnerCredContent = await readFile(fixture.runnerCredPath, "utf8");
-      expect(runnerCredContent.trim()).toBe("password");
+      expect(runnerCredContent.trim().length).toBeGreaterThan(0);
       const runnerMetadata = await readJson(fixture.runnerMetadataPath);
       expect(runnerMetadata.sshUser).toBe("root");
       expect(runnerMetadata.sshPort).toBe(fixture.port);
@@ -290,13 +270,8 @@ describe("example workspaces (real devcontainers)", () => {
       const rebuiltContainerId = String(rebuiltState.lastContainerId);
       expect(rebuiltState.port).toBe(fixture.port);
       expect(rebuiltContainerId).not.toBe(firstContainerId);
-      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([
-        String(fixture.port),
-        String(fixture.port),
-      ]);
-
-      const restoredHostKey = execInContainerAsRoot(fixture, rebuiltContainerId, "cat /etc/ssh/ssh_host_devbox_test_key");
-      expect(restoredHostKey.stdout.trim()).toBe(fixture.runnerHostKeyMarker);
+      const restoredHostKey = execInContainerAsRoot(fixture, rebuiltContainerId, "find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key' | head -n 1");
+      expect(restoredHostKey.stdout.trim().length).toBeGreaterThan(0);
 
       const down = runCli(fixture, ["down"]);
       expect(down.exitCode).toBe(0);
@@ -304,7 +279,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(await listManagedContainerIds(fixture)).toEqual([]);
       expect(existsSync(fixture.runnerCredPath)).toBe(true);
       expect(existsSync(fixture.runnerMetadataPath)).toBe(true);
-      expect(await readTrimmedFile(fixture.runnerArtifacts.hostKey)).toBe(fixture.runnerHostKeyMarker);
+      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
       expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 12 * 60_000 },
@@ -359,10 +334,7 @@ describe("example workspaces (real devcontainers)", () => {
             mount.Destination === fixture.remoteWorkspaceFolder,
         ),
       ).toBe(true);
-      expect(await readLines(fixture.runnerArtifacts.runnerInvocations)).toEqual([
-        String(fixture.port),
-        String(fixture.port),
-      ]);
+      expect(existsSync(path.join(fixture.workspacePath, RUNNER_HOST_KEYS_DIRNAME))).toBe(true);
 
       const sample = execInContainer(
         fixture,
@@ -422,12 +394,8 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
   }
 
   const remoteWorkspaceFolder = getDefaultRemoteWorkspaceFolder(workspacePath);
-  const runnerHostKeyMarker = `devbox-test-host-key-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const runnerScriptPath = path.join(workspacePath, ".devbox-test-runner.sh");
-  await writeFile(runnerScriptPath, buildFakeRunnerScript(runnerHostKeyMarker), "utf8");
 
   const env = baseEnv();
-  env.DEVBOX_RUNNER_URL = `file://${path.posix.join(remoteWorkspaceFolder, ".devbox-test-runner.sh")}`;
   env.DEVBOX_TEST_GH_TOKEN = options.ghToken ?? "";
   env.HOME = homeDir;
   env.PATH = `${wrappersDir}${path.delimiter}${env.PATH}`;
@@ -442,18 +410,10 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
     port: await findAvailablePort(),
     remoteWorkspaceFolder,
     runnerArtifacts: {
-      ghToken: path.join(workspacePath, ".devbox-test-gh-token"),
-      gitUserEmail: path.join(workspacePath, ".devbox-test-git-user-email"),
-      gitUserName: path.join(workspacePath, ".devbox-test-git-user-name"),
-      hostKey: path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME, "ssh_host_devbox_test_key"),
-      hostKeyPub: path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME, "ssh_host_devbox_test_key.pub"),
       knownHosts: path.join(workspacePath, ".devbox-test-known-hosts"),
-      runnerInvocations: path.join(workspacePath, ".devbox-test-runner-invocations"),
-      sshAuthSock: path.join(workspacePath, ".devbox-test-ssh-auth-sock"),
     },
     runnerCredPath: path.join(workspacePath, RUNNER_CRED_FILENAME),
     runnerMetadataPath: path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME),
-    runnerHostKeyMarker,
     sampleFilePath: path.join(workspacePath, "sample-file.txt"),
     sshAuthSockPath,
     statePath: getStatePath(workspacePath),
@@ -709,55 +669,6 @@ exit 1
     "utf8",
   );
   await chmod(ghWrapperPath, 0o755);
-}
-
-function buildFakeRunnerScript(hostKeyMarker: string): string {
-  return `#!/usr/bin/env bash
-set -euo pipefail
-
-workspace_root="$(dirname "$CRED_FILE")"
-printf '%s\\n' "$SSH_PORT" >> "$workspace_root/.devbox-test-runner-invocations"
-
-if [ -n "\${GH_TOKEN:-}" ]; then
-  printf '%s\\n' "$GH_TOKEN" > "$workspace_root/.devbox-test-gh-token"
-fi
-
-git_user_name=""
-git_user_email=""
-if command -v git >/dev/null 2>&1; then
-  git_user_name="$(git config --global --get user.name 2>/dev/null || true)"
-  git_user_email="$(git config --global --get user.email 2>/dev/null || true)"
-fi
-
-if [ -n "$git_user_name" ]; then
-  printf '%s\\n' "$git_user_name" > "$workspace_root/.devbox-test-git-user-name"
-fi
-
-if [ -n "$git_user_email" ]; then
-  printf '%s\\n' "$git_user_email" > "$workspace_root/.devbox-test-git-user-email"
-fi
-
-if [ -f "$HOME/.ssh/known_hosts" ]; then
-  cp "$HOME/.ssh/known_hosts" "$workspace_root/.devbox-test-known-hosts"
-fi
-
-if [ -n "\${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
-  printf '%s\\n' "$SSH_AUTH_SOCK" > "$workspace_root/.devbox-test-ssh-auth-sock"
-else
-  printf '%s\\n' 'missing' > "$workspace_root/.devbox-test-ssh-auth-sock"
-fi
-
-printf 'password\\n' > "$CRED_FILE"
-
-root_script="mkdir -p /etc/ssh && if [ ! -f /etc/ssh/ssh_host_devbox_test_key ]; then printf '%s\\\\n' '${hostKeyMarker}' > /etc/ssh/ssh_host_devbox_test_key && chmod 600 /etc/ssh/ssh_host_devbox_test_key; fi && if [ ! -f /etc/ssh/ssh_host_devbox_test_key.pub ]; then printf '%s\\\\n' '${hostKeyMarker}.pub' > /etc/ssh/ssh_host_devbox_test_key.pub && chmod 644 /etc/ssh/ssh_host_devbox_test_key.pub; fi"
-if [ "$(id -u)" -eq 0 ]; then
-  sh -lc "$root_script"
-else
-  sudo sh -lc "$root_script"
-fi
-
-  printf 'SSH user: root\\nSSH pass: password\\nSSH port: %s\\nPermitRootLogin: yes\\n' "$SSH_PORT"
-`;
 }
 
 function buildFallbackDevcontainerWrapper(realDockerPath: string, image: string): string {
@@ -1016,16 +927,4 @@ function findExecutable(command: string): string | null {
 
 async function readJson(filePath: string): Promise<any> {
   return JSON.parse(await readFile(filePath, "utf8"));
-}
-
-async function readTrimmedFile(filePath: string): Promise<string> {
-  return (await readFile(filePath, "utf8")).trim();
-}
-
-async function readLines(filePath: string): Promise<string[]> {
-  const content = await readFile(filePath, "utf8");
-  return content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
 }

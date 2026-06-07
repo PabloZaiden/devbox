@@ -10,6 +10,4 @@ export const KNOWN_HOSTS_SNAPSHOT_FILENAME = "known_hosts";
 export const RUNNER_CRED_FILENAME = ".sshcred";
 export const DEVBOX_SSH_METADATA_FILENAME = ".devbox-ssh.json";
 export const RUNNER_HOST_KEYS_DIRNAME = ".devbox-ssh-host-keys";
-export const RUNNER_URL =
-  "https://raw.githubusercontent.com/PabloZaiden/ssh-server-runner/main/ssh-server.sh";
 export const STATE_VERSION = 2;

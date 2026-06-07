@@ -16,6 +16,7 @@ import {
   findFirstAvailablePort,
   buildPersistRunnerHostKeysScript,
   buildRestoreRunnerHostKeysScript,
+  buildStartRunnerScript,
   buildStopManagedSshdScript,
   formatDevcontainerProgressLine,
   getRunnerCredFile,
@@ -651,6 +652,16 @@ describe("getRunnerCredFile", () => {
     expect(getRunnerCredFile("/workspaces/example-project/")).toBe(
       "/workspaces/example-project/.sshcred",
     );
+  });
+});
+
+describe("buildStartRunnerScript", () => {
+  test("runs the bundled runner from stdin without downloading an external script", () => {
+    const script = buildStartRunnerScript(5001, "/workspaces/example-project");
+
+    expect(script).toBe("env SSH_PORT='5001' CRED_FILE='/workspaces/example-project/.sshcred' bash -s");
+    expect(script).not.toContain("curl");
+    expect(script).not.toContain("http");
   });
 });
 

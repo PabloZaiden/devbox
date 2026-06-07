@@ -18,10 +18,10 @@ import {
   MANAGED_LABEL_KEY,
   RUNNER_CRED_FILENAME,
   RUNNER_HOST_KEYS_DIRNAME,
-  RUNNER_URL,
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 import { parseRunnerCredentials, type RunnerCredentials } from "./runnerState";
+import bundledRunnerScript from "./runner/ssh-server.sh" with { type: "text" };
 
 interface ExecResult {
   stdout: string;
@@ -42,6 +42,7 @@ class CommandError extends Error {
 interface ExecOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
+  stdin?: string | Uint8Array;
   stdoutMode?: "capture" | "raw" | "devcontainer-json";
   stderrMode?: "capture" | "raw" | "devcontainer-json";
   allowFailure?: boolean;
@@ -802,8 +803,8 @@ export async function startRunner(
   port: number,
   remoteWorkspaceFolder: string,
 ): Promise<RunnerCredentials> {
-  const script = `curl -fsSL ${quoteShell(getRunnerUrl())} | env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash`;
-  const result = await devcontainerExec(containerId, script, { quiet: true });
+  const script = buildStartRunnerScript(port, remoteWorkspaceFolder);
+  const result = await devcontainerExec(containerId, script, { quiet: true, stdin: bundledRunnerScript });
   const summaryLines = getRunnerSummaryLines(result.stdout);
   const parsedSummary = parseRunnerCredentials(summaryLines.join("\n"));
 
@@ -827,6 +828,10 @@ export async function startRunner(
   };
 }
 
+export function buildStartRunnerScript(port: number, remoteWorkspaceFolder: string): string {
+  return `env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash -s`;
+}
+
 export async function persistRunnerHostKeys(
   containerId: string,
   remoteWorkspaceFolder: string,
@@ -835,11 +840,6 @@ export async function persistRunnerHostKeys(
     quiet: true,
     user: "root",
   });
-}
-
-function getRunnerUrl(): string {
-  const override = process.env.DEVBOX_RUNNER_URL?.trim();
-  return override && override.length > 0 ? override : RUNNER_URL;
 }
 
 export function resolveShellContainerId(input: {
@@ -934,10 +934,11 @@ async function isDockerRootlessEngine(): Promise<boolean> {
 async function devcontainerExec(
   containerId: string,
   script: string,
-  options: { quiet: boolean },
+  options: { quiet: boolean; stdin?: string | Uint8Array },
 ): Promise<ExecResult> {
   const args = ["devcontainer", "exec", "--container-id", containerId, "sh", "-lc", script];
   return execute(args, {
+    stdin: options.stdin,
     stdoutMode: options.quiet ? "capture" : "raw",
     stderrMode: options.quiet ? "capture" : "raw",
   });
@@ -1325,8 +1326,11 @@ async function execute(command: string[], options: ExecOptions): Promise<ExecRes
   const subprocess = spawn(command[0], command.slice(1), {
     cwd: options.cwd,
     env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
+  if (options.stdin !== undefined) {
+    subprocess.stdin?.end(options.stdin);
+  }
 
   const stdoutPromise = consumeStream(subprocess.stdout, options.stdoutMode ?? "capture", false);
   const stderrPromise = consumeStream(subprocess.stderr, options.stderrMode ?? "capture", true);

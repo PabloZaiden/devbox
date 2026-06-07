@@ -14,7 +14,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Shares a usable SSH agent socket with the container and copies a validated, non-empty `known_hosts` snapshot into the container.
 - Exposes the SSH service on the chosen host port and, when a host public key is available, installs it for key-based SSH login inside the devcontainer.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
-- Runs the [`ssh-server-runner`](https://github.com/PabloZaiden/ssh-server-runner) one-liner inside the devcontainer.
+- Runs devbox's bundled SSH server setup script inside the devcontainer.
 - Stores devbox-owned state in the workspace-local `.devbox/` directory, and persists the runner password as `.sshcred`, SSH metadata in `.devbox-ssh.json`, and SSH host keys in `.devbox-ssh-host-keys/`, so they survive `down` / `rebuild`.
 
 ## Installation
@@ -104,7 +104,7 @@ When you run `devbox rebuild`, omitting the port reuses the last stored port for
 
 `devbox status` always prints JSON so it can be used directly from scripts and automation.
 
-`devbox templates` always prints JSON. Each entry includes the template name, description, pinned image/reference, runtime version, language tags, and whether the template is compatible with `ssh-server-runner`.
+`devbox templates` always prints JSON. Each entry includes the template name, description, pinned image/reference, runtime version, language tags, and whether the template is compatible with the bundled devbox SSH runner.
 
 Built-in templates:
 
