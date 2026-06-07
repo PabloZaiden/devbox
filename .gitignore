@@ -1,7 +1,5 @@
 node_modules/
 dist/
 coverage/
-.sshcred
-.devbox-ssh-host-keys/
 .devbox/
 .planning/

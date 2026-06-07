@@ -2,11 +2,13 @@ import { access, lstat } from "node:fs/promises";
 import path from "node:path";
 import {
   getManagedPortFromContainerName,
+  getWorkspaceRunnerCredentialFile,
+  getWorkspaceRunnerHostKeysDir,
+  getWorkspaceSshMetadataFile,
   getWorkspaceStateFile,
   type WorkspaceState,
   type DockerInspect,
 } from "./core";
-import { DEVBOX_SSH_METADATA_FILENAME, RUNNER_CRED_FILENAME, RUNNER_HOST_KEYS_DIRNAME } from "./constants";
 
 export interface RecoveredWorkspaceMount {
   destination: string;
@@ -193,9 +195,9 @@ export async function inspectWorkspaceRestartReadiness(
   }
 
   const statePath = getWorkspaceStateFile(workspacePath);
-  const credentialPath = path.join(workspacePath, RUNNER_CRED_FILENAME);
-  const sshMetadataPath = path.join(workspacePath, DEVBOX_SSH_METADATA_FILENAME);
-  const hostKeysPath = path.join(workspacePath, RUNNER_HOST_KEYS_DIRNAME);
+  const credentialPath = getWorkspaceRunnerCredentialFile(workspacePath);
+  const sshMetadataPath = getWorkspaceSshMetadataFile(workspacePath);
+  const hostKeysPath = getWorkspaceRunnerHostKeysDir(workspacePath);
 
   const hasStateFile = await pathExists(statePath, accessFile);
   const hasCredentialFile = await pathExists(credentialPath, accessFile);
@@ -207,19 +209,19 @@ export async function inspectWorkspaceRestartReadiness(
     foundArtifacts.push("saved state");
   }
   if (hasCredentialFile) {
-    foundArtifacts.push(RUNNER_CRED_FILENAME);
+    foundArtifacts.push(".devbox/ssh/credentials");
   }
   if (hasSshMetadataFile) {
-    foundArtifacts.push(DEVBOX_SSH_METADATA_FILENAME);
+    foundArtifacts.push(".devbox/ssh/metadata.json");
   }
   if (hasHostKeysDir) {
-    foundArtifacts.push(`${RUNNER_HOST_KEYS_DIRNAME}/`);
+    foundArtifacts.push(".devbox/ssh/host-keys/");
   }
 
   if (reasons.length === 0 && foundArtifacts.length === 0) {
     reasons.push(
       `No devbox restart leftovers were found in ${workspacePath}. Expected at least one of: saved state, ` +
-      `${RUNNER_CRED_FILENAME}, ${DEVBOX_SSH_METADATA_FILENAME}, or ${RUNNER_HOST_KEYS_DIRNAME}/.`,
+      `.devbox/ssh/credentials, .devbox/ssh/metadata.json, or .devbox/ssh/host-keys/.`,
     );
   }
 

@@ -9,10 +9,14 @@ import pkg from "../package.json";
 import {
   CLI_NAME,
   DEFAULT_UP_AUTO_PORT_START,
+  DEVBOX_SSH_DIRNAME,
+  DEVBOX_SSH_METADATA_FILENAME,
   DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
   KNOWN_HOSTS_SNAPSHOT_FILENAME,
   LEGACY_GENERATED_CONFIG_BASENAME,
   MANAGED_LABEL_KEY,
+  RUNNER_CRED_FILENAME,
+  RUNNER_HOST_KEYS_DIRNAME,
   SSH_AUTH_SOCK_TARGET,
   STATE_VERSION,
   WORKSPACE_LABEL_KEY,
@@ -124,7 +128,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus ssh-server-runner\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} templates\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up         Start or reuse the managed devcontainer.\n  rebuild    Recreate the managed devcontainer.\n  shell      Open an interactive shell in the running managed container.\n  status     Print JSON describing the managed devbox for this workspace.\n  templates  Print JSON describing the built-in templates.\n  arise      Restart stopped managed workspaces discovered from existing containers.\n  down       Stop and remove the managed container for this workspace.\n  help       Show this help.\n\nOptions:\n  -p, --port <port>               Publish the same port on host and container.\n  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  --template <name>               Use a built-in template instead of a repo devcontainer.\n  -h, --help                      Show this help.`;
+  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus a bundled SSH server\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} templates\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up         Start or reuse the managed devcontainer.\n  rebuild    Recreate the managed devcontainer.\n  shell      Open an interactive shell in the running managed container.\n  status     Print JSON describing the managed devbox for this workspace.\n  templates  Print JSON describing the built-in templates.\n  arise      Restart stopped managed workspaces discovered from existing containers.\n  down       Stop and remove the managed container for this workspace.\n  help       Show this help.\n\nOptions:\n  -p, --port <port>               Publish the same port on host and container.\n  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  --template <name>               Use a built-in template instead of a repo devcontainer.\n  -h, --help                      Show this help.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -406,6 +410,22 @@ export function getWorkspaceStateFile(workspacePath: string): string {
 
 export function getWorkspaceUserDataDir(workspacePath: string): string {
   return path.join(getWorkspaceStateDir(workspacePath), "user-data");
+}
+
+export function getWorkspaceSshDir(workspacePath: string): string {
+  return path.join(getWorkspaceStateDir(workspacePath), DEVBOX_SSH_DIRNAME);
+}
+
+export function getWorkspaceRunnerCredentialFile(workspacePath: string): string {
+  return path.join(getWorkspaceSshDir(workspacePath), RUNNER_CRED_FILENAME);
+}
+
+export function getWorkspaceSshMetadataFile(workspacePath: string): string {
+  return path.join(getWorkspaceSshDir(workspacePath), DEVBOX_SSH_METADATA_FILENAME);
+}
+
+export function getWorkspaceRunnerHostKeysDir(workspacePath: string): string {
+  return path.join(getWorkspaceSshDir(workspacePath), RUNNER_HOST_KEYS_DIRNAME);
 }
 
 export function getTemplateGeneratedConfigPath(workspacePath: string): string {
@@ -978,7 +998,7 @@ function resolveBuiltInTemplate(name: string): WorkspaceTemplateState {
   }
 
   if (!definition.runnerCompatible) {
-    throw new UserError(`Template ${name} is not compatible with ssh-server-runner.`);
+    throw new UserError(`Template ${name} is not compatible with the bundled devbox SSH runner.`);
   }
 
   validateSupportedDevcontainerConfig(definition.config);

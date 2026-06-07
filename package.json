@@ -2,7 +2,7 @@
   "name": "@pablozaiden/devbox",
   "version": "0.1.0",
   "type": "module",
-  "description": "CLI to run and expose a devcontainer with SSH agent sharing and a forwarded ssh-server-runner port.",
+  "description": "CLI to run and expose a devcontainer with SSH agent sharing and a bundled SSH server.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PabloZaiden/devbox.git"

@@ -8,11 +8,12 @@ import {
   getDefaultRemoteWorkspaceFolder,
   getManagedLabels,
   getManagedPortFromContainerName,
+  getWorkspaceRunnerCredentialFile,
+  getWorkspaceSshMetadataFile,
   getWorkspaceStateFile,
   hashWorkspacePath,
   loadWorkspaceState,
 } from "./core";
-import { DEVBOX_SSH_METADATA_FILENAME, RUNNER_CRED_FILENAME } from "./constants";
 import { parseRunnerCredentials, parseRunnerMetadata, type RunnerCredentials, type RunnerMetadata } from "./runnerState";
 import { formatCommandError, inspectContainers, isCommandError, isExecutableAvailable, listManagedContainers } from "./runtime";
 
@@ -111,9 +112,9 @@ export async function getDevboxStatus(
     warnings.push(`Found ${containers.length} managed containers for this workspace; reporting the preferred container.`);
   }
 
-  const credentialPath = path.join(input.workspacePath, RUNNER_CRED_FILENAME);
+  const credentialPath = getWorkspaceRunnerCredentialFile(input.workspacePath);
   const credentialFile = await readRunnerCredentialsFile(credentialPath, readFile);
-  const sshMetadataPath = path.join(input.workspacePath, DEVBOX_SSH_METADATA_FILENAME);
+  const sshMetadataPath = getWorkspaceSshMetadataFile(input.workspacePath);
   const sshMetadataFile = await readRunnerMetadataFile(sshMetadataPath, readFile, warnings);
   const configHints = state?.template
     ? readConfigHintsFromConfig({
