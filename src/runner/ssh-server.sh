@@ -148,6 +148,7 @@ npm install -g @fresh-editor/fresh-editor
 echo "min-release-age=3" > "$HOME/.npmrc"
 echo "[install]
 minimumReleaseAge = 259200" > "$HOME/.bunfig.toml"
+append_unique_line "$HOME/.tmux.conf" "set -g mouse on"
 
 # Use existing password if present, otherwise create it once
 if [[ -f "$CRED_FILE" ]]; then
