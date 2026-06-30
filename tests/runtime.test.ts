@@ -667,6 +667,16 @@ describe("buildStartRunnerScript", () => {
   });
 });
 
+describe("bundled runner script", () => {
+  test("normalizes the sshd runtime directory permissions regardless of umask", async () => {
+    const script = await readFile(new URL("../src/runner/ssh-server.sh", import.meta.url), "utf8");
+
+    expect(script).toContain("mkdir -p /var/run/sshd");
+    expect(script).toContain("chown root:root /var/run/sshd");
+    expect(script).toContain("chmod 0755 /var/run/sshd");
+  });
+});
+
 describe("isDockerRootlessSecurityOptions", () => {
   test("detects a rootless docker engine", () => {
     expect(isDockerRootlessSecurityOptions(["name=seccomp,profile=builtin", "name=rootless"])).toBe(true);
