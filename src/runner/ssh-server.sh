@@ -97,6 +97,8 @@ else
 fi
 
 mkdir -p /var/run/sshd
+chown root:root /var/run/sshd
+chmod 0755 /var/run/sshd
 mkdir -p /etc/ssh/sshd_config.d
 '
 
