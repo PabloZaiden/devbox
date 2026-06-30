@@ -7,6 +7,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import {
   type DockerInspect,
+  type GithubAuthPreference,
   type UpResult,
   getContainerSshAuthSockPath,
   UserError,
@@ -66,6 +67,7 @@ export interface ResolvedHostEnvironment extends ResolvedSshAuthSock {
   gitUserName: string | null;
   gitUserEmail: string | null;
   githubToken: string | null;
+  githubAuth: GithubAuthPreference | null;
   githubTokenWarning?: string;
 }
 
@@ -440,6 +442,7 @@ export function resolveSshAuthSockSource(input: {
 export async function ensureHostEnvironment(options: {
   allowMissingSsh: boolean;
   workspacePath: string;
+  githubAuth: GithubAuthPreference | null;
 }): Promise<ResolvedHostEnvironment> {
   if (process.platform !== "darwin" && process.platform !== "linux") {
     throw new UserError(`Unsupported platform: ${process.platform}. macOS and Linux are supported in v1.`);
@@ -460,7 +463,7 @@ export async function ensureHostEnvironment(options: {
     isDockerRootlessEngine(),
     tryGetGitConfig(options.workspacePath, "user.name"),
     tryGetGitConfig(options.workspacePath, "user.email"),
-    tryGetGhCliToken(),
+    tryGetGhCliToken(options.githubAuth),
   ]);
 
   return {
@@ -474,6 +477,7 @@ export async function ensureHostEnvironment(options: {
     gitUserName,
     gitUserEmail,
     githubToken: ghCliToken.token,
+    githubAuth: options.githubAuth,
     githubTokenWarning: ghCliToken.warning,
   };
 }
@@ -1192,12 +1196,21 @@ export function looksLikeGhUnauthenticatedError(stderr: string): boolean {
   );
 }
 
-async function tryGetGhCliToken(): Promise<ResolvedGhCliToken> {
+export function buildGhCliTokenArgs(githubAuth: GithubAuthPreference | null): string[] {
+  const args = ["gh", "auth", "token"];
+  if (githubAuth) {
+    args.push("--hostname", githubAuth.host, "--user", githubAuth.user);
+  }
+
+  return args;
+}
+
+async function tryGetGhCliToken(githubAuth: GithubAuthPreference | null): Promise<ResolvedGhCliToken> {
   if (!isExecutableAvailable("gh")) {
     return { token: null };
   }
 
-  const result = await execute(["gh", "auth", "token"], {
+  const result = await execute(buildGhCliTokenArgs(githubAuth), {
     stdoutMode: "capture",
     stderrMode: "capture",
     allowFailure: true,

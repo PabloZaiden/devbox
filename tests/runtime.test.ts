@@ -9,6 +9,7 @@ import {
   buildConfigureAuthorizedKeysScript,
   buildCopyKnownHostsScript,
   buildConfigureGitIdentityScript,
+  buildGhCliTokenArgs,
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
   ensurePathIgnored,
@@ -627,6 +628,24 @@ describe("resolveGhCliToken", () => {
       token: null,
       warning: "GitHub CLI returned an empty auth token. Continuing without GH_TOKEN injection.",
     });
+  });
+});
+
+describe("buildGhCliTokenArgs", () => {
+  test("uses the active GitHub CLI account by default", () => {
+    expect(buildGhCliTokenArgs(null)).toEqual(["gh", "auth", "token"]);
+  });
+
+  test("targets a persisted GitHub CLI account when provided", () => {
+    expect(buildGhCliTokenArgs({ host: "github.com", user: "work-account" })).toEqual([
+      "gh",
+      "auth",
+      "token",
+      "--hostname",
+      "github.com",
+      "--user",
+      "work-account",
+    ]);
   });
 });
 

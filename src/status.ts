@@ -4,6 +4,7 @@ import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
 import type { ParseError } from "jsonc-parser";
 import {
   type DockerInspect,
+  type GithubAuthPreference,
   type WorkspaceState,
   getDefaultRemoteWorkspaceFolder,
   getManagedLabels,
@@ -57,6 +58,7 @@ export interface DevboxStatus {
   sourceConfigPath: string | null;
   generatedConfigPath: string | null;
   userDataDir: string | null;
+  githubAuth: GithubAuthPreference | null;
   updatedAt: string | null;
   warnings: string[];
 }
@@ -194,6 +196,7 @@ export async function getDevboxStatus(
     sourceConfigPath: state?.sourceConfigPath ?? configHints.sourceConfigPath,
     generatedConfigPath: state?.generatedConfigPath ?? null,
     userDataDir: state?.userDataDir ?? null,
+    githubAuth: state?.githubAuth ? { ...state.githubAuth } : null,
     updatedAt: state?.updatedAt ?? null,
     warnings,
   };
