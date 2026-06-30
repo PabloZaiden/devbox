@@ -53,6 +53,7 @@ describe("getDevboxStatus", () => {
       labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
       userDataDir: "/tmp/ws-state",
       template: null,
+      githubAuth: { host: "github.com", user: "work-account" },
       lastContainerId: "container-2",
       updatedAt: "2026-03-16T00:00:00.000Z",
     };
@@ -121,6 +122,7 @@ describe("getDevboxStatus", () => {
     expect(status.containerId).toBe("container-2");
     expect(status.containerCount).toBe(2);
     expect(status.hasSshMetadataFile).toBe(true);
+    expect(status.githubAuth).toEqual({ host: "github.com", user: "work-account" });
     expect(status.warnings).toEqual([
       "Found 2 managed containers for this workspace; reporting the preferred container.",
     ]);
@@ -189,6 +191,7 @@ describe("getDevboxStatus", () => {
           labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
           userDataDir: "/tmp/state",
           template: null,
+          githubAuth: null,
           lastContainerId: null,
           updatedAt: "2026-03-16T00:00:00.000Z",
         },
@@ -231,6 +234,7 @@ describe("getDevboxStatus", () => {
           labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
           userDataDir: "/tmp/state",
           template: null,
+          githubAuth: null,
           lastContainerId: null,
           updatedAt: "2026-03-16T00:00:00.000Z",
         },
@@ -273,6 +277,7 @@ describe("getDevboxStatus", () => {
           labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
           userDataDir: "/tmp/state",
           template: null,
+          githubAuth: null,
           lastContainerId: "container-stale",
           updatedAt: "2026-03-16T00:00:00.000Z",
         },
@@ -308,6 +313,7 @@ describe("getDevboxStatus", () => {
           labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
           userDataDir: "/tmp/state",
           template: null,
+          githubAuth: null,
           lastContainerId: "container-1",
           updatedAt: "2026-03-16T00:00:00.000Z",
         },
@@ -368,6 +374,7 @@ describe("getDevboxStatus", () => {
           labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
           userDataDir: "/tmp/state",
           template: null,
+          githubAuth: null,
           lastContainerId: "container-1",
           updatedAt: "2026-03-16T00:00:00.000Z",
         },

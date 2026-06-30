@@ -109,6 +109,20 @@ describe("parseArgs", () => {
     });
   });
 
+  test("supports selecting a GitHub CLI account for up and rebuild", () => {
+    expect(parseArgs(["up", "--gh-user", "work-account"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      githubUser: "work-account",
+    });
+    expect(parseArgs(["rebuild", "--gh-user=personal", "--gh-host=github.example.com"])).toEqual({
+      command: "rebuild",
+      allowMissingSsh: false,
+      githubUser: "personal",
+      githubHost: "github.example.com",
+    });
+  });
+
   test("requires an explicit command for options or ports", () => {
     expect(() => parseArgs(["5001"])).toThrow("A command is required.");
     expect(() => parseArgs(["--devcontainer-subpath=python"])).toThrow("A command is required.");
@@ -145,6 +159,9 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["status", "--ssh-public-key", "/tmp/id_rsa.pub"])).toThrow(
       "The status command does not accept --ssh-public-key.",
     );
+    expect(() => parseArgs(["status", "--gh-user", "work"])).toThrow(
+      "The status command does not accept --gh-user.",
+    );
   });
 
   test("arise rejects ports and unrelated options", () => {
@@ -168,6 +185,12 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["up", "--template", "python", "--devcontainer-subpath", "services/api"])).toThrow(
       "--template cannot be combined with --devcontainer-subpath.",
     );
+  });
+
+  test("rejects invalid GitHub auth options", () => {
+    expect(() => parseArgs(["up", "--gh-user", ""])).toThrow("Expected a value after --gh-user.");
+    expect(() => parseArgs(["up", "--gh-user", "not valid"])).toThrow("Invalid GitHub user:");
+    expect(() => parseArgs(["up", "--gh-host", "https://github.com"])).toThrow("Invalid GitHub host:");
   });
 });
 
@@ -214,6 +237,7 @@ describe("resolvePort", () => {
         labels: { managed: "true" },
         userDataDir: "/tmp/state",
         template: null,
+        githubAuth: null,
         updatedAt: new Date().toISOString(),
       }),
     ).toBe(5003);
@@ -256,8 +280,39 @@ describe("loadWorkspaceState", () => {
       labels: { managed: "true" },
       userDataDir: path.join(workspacePath, ".devbox", "user-data"),
       template: null,
+      githubAuth: null,
       lastContainerId: "container-123",
       updatedAt: "2026-04-23T00:00:00.000Z",
+    });
+  });
+
+  test("loads a persisted GitHub auth preference", async () => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
+    tempPaths.push(workspacePath);
+
+    const statePath = getWorkspaceStateFile(workspacePath);
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        version: STATE_VERSION,
+        workspacePath,
+        workspaceHash: "hash",
+        port: 5001,
+        configSource: "repo",
+        sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+        generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
+        labels: { managed: "true" },
+        userDataDir: path.join(workspacePath, ".devbox", "user-data"),
+        template: null,
+        githubAuth: { host: "github.com", user: "work-account" },
+        updatedAt: "2026-04-23T00:00:00.000Z",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(loadWorkspaceState(workspacePath)).resolves.toMatchObject({
+      githubAuth: { host: "github.com", user: "work-account" },
     });
   });
 });
@@ -274,6 +329,7 @@ describe("resolveUpPortPreference", () => {
     labels: { managed: "true" },
     userDataDir: "/tmp/state",
     template: null,
+    githubAuth: null,
     updatedAt: new Date().toISOString(),
   };
 
@@ -414,6 +470,7 @@ describe("resolveWorkspaceConfig", () => {
       labels: {},
       userDataDir: path.join(tempDir, ".devbox", "user-data"),
       template,
+      githubAuth: null,
       updatedAt: new Date().toISOString(),
     };
 
@@ -462,6 +519,7 @@ describe("resolveWorkspaceConfig", () => {
       labels: {},
       userDataDir: path.join(tempDir, ".devbox", "user-data"),
       template,
+      githubAuth: null,
       updatedAt: new Date().toISOString(),
     };
 

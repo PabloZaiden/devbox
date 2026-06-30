@@ -246,6 +246,7 @@ describe("ariseManagedWorkspaces", () => {
           labels: { "devbox.managed": "true", "devbox.workspace": "hash-ok" },
           userDataDir: "/tmp/state-ok",
           template: null,
+          githubAuth: null,
           updatedAt: "2026-03-20T00:00:00.000Z",
         },
       ],

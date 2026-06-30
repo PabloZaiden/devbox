@@ -24,6 +24,7 @@ import {
   resolveUpPortPreference,
   saveWorkspaceState,
   type DockerInspect,
+  type GithubAuthPreference,
   UserError,
   writeManagedConfig,
 } from "./core";
@@ -110,6 +111,8 @@ async function main(): Promise<void> {
     parsed.devcontainerSubpath,
     parsed.sshPublicKeyPath,
     parsed.templateName,
+    parsed.githubUser,
+    parsed.githubHost,
   );
 }
 
@@ -122,8 +125,16 @@ async function handleUpLike(
   devcontainerSubpath: string | undefined,
   sshPublicKeyPath?: string,
   templateName?: string,
+  explicitGithubUser?: string,
+  explicitGithubHost?: string,
 ): Promise<void> {
-  const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath });
+  const githubAuth = resolveGithubAuthPreference({
+    explicitUser: explicitGithubUser,
+    explicitHost: explicitGithubHost,
+    state,
+    env: process.env,
+  });
+  const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath, githubAuth });
   const resolvedSshPublicKey = await resolveSshPublicKey({ overridePath: sshPublicKeyPath });
   const workspaceHash = hashWorkspacePath(workspacePath);
   const labels = getManagedLabels(workspaceHash);
@@ -192,7 +203,11 @@ async function handleUpLike(
     console.log(`Using host SSH agent socket from ${environment.sshAuthSock}.`);
   }
   if (environment.githubToken) {
-    console.log("Using host GitHub authentication from gh.");
+    if (environment.githubAuth) {
+      console.log(`Using host GitHub authentication from gh account ${environment.githubAuth.user}@${environment.githubAuth.host}.`);
+    } else {
+      console.log("Using host GitHub authentication from gh.");
+    }
   }
 
   if (resolvedConfig.configSource === "repo" && resolvedConfig.sourceConfigPath) {
@@ -308,6 +323,7 @@ async function handleUpLike(
       userDataDir,
       labels,
       template: resolvedConfig.template,
+      githubAuth: environment.githubAuth,
       containerId: upResult.containerId,
     }),
   );
@@ -433,6 +449,26 @@ async function handleArise(): Promise<void> {
   if (summary.failedWorkspaces.length > 0) {
     process.exitCode = 1;
   }
+}
+
+function resolveGithubAuthPreference(input: {
+  explicitUser?: string;
+  explicitHost?: string;
+  state: Awaited<ReturnType<typeof loadWorkspaceState>>;
+  env: Record<string, string | undefined>;
+}): GithubAuthPreference | null {
+  const envUser = input.env.DEVBOX_GH_USER?.trim() || undefined;
+  const envHost = input.env.DEVBOX_GH_HOST?.trim() || undefined;
+  const user = input.explicitUser ?? envUser ?? input.state?.githubAuth?.user;
+
+  if (!user) {
+    return null;
+  }
+
+  return {
+    user,
+    host: input.explicitHost ?? envHost ?? input.state?.githubAuth?.host ?? "github.com",
+  };
 }
 
 function getPublishedHostPorts(container: DockerInspect): number[] {

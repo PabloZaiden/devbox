@@ -32,6 +32,8 @@ export interface ParsedArgs {
   devcontainerSubpath?: string;
   sshPublicKeyPath?: string;
   templateName?: string;
+  githubUser?: string;
+  githubHost?: string;
 }
 
 export type DevcontainerConfig = Record<string, unknown>;
@@ -66,8 +68,14 @@ export interface WorkspaceState {
   labels: Record<string, string>;
   userDataDir: string;
   template: WorkspaceTemplateState | null;
+  githubAuth: GithubAuthPreference | null;
   lastContainerId?: string;
   updatedAt: string;
+}
+
+export interface GithubAuthPreference {
+  host: string;
+  user: string;
 }
 
 export interface WorkspaceTemplateState {
@@ -128,7 +136,7 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus a bundled SSH server\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} templates\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up         Start or reuse the managed devcontainer.\n  rebuild    Recreate the managed devcontainer.\n  shell      Open an interactive shell in the running managed container.\n  status     Print JSON describing the managed devbox for this workspace.\n  templates  Print JSON describing the built-in templates.\n  arise      Restart stopped managed workspaces discovered from existing containers.\n  down       Stop and remove the managed container for this workspace.\n  help       Show this help.\n\nOptions:\n  -p, --port <port>               Publish the same port on host and container.\n  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  --template <name>               Use a built-in template instead of a repo devcontainer.\n  -h, --help                      Show this help.`;
+  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus a bundled SSH server\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} templates\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up         Start or reuse the managed devcontainer.\n  rebuild    Recreate the managed devcontainer.\n  shell      Open an interactive shell in the running managed container.\n  status     Print JSON describing the managed devbox for this workspace.\n  templates  Print JSON describing the built-in templates.\n  arise      Restart stopped managed workspaces discovered from existing containers.\n  down       Stop and remove the managed container for this workspace.\n  help       Show this help.\n\nOptions:\n  -p, --port <port>               Publish the same port on host and container.\n  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  --template <name>               Use a built-in template instead of a repo devcontainer.\n  --gh-user <login>               Use and persist a specific GitHub CLI account for GH_TOKEN injection.\n  --gh-host <host>                GitHub host for --gh-user. Defaults to github.com.\n  -h, --help                      Show this help.`;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -165,6 +173,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let devcontainerSubpath: string | undefined;
   let sshPublicKeyPath: string | undefined;
   let templateName: string | undefined;
+  let githubUser: string | undefined;
+  let githubHost: string | undefined;
   const positionals: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -211,6 +221,36 @@ export function parseArgs(argv: string[]): ParsedArgs {
       }
       templateName = parseTemplateName(value);
       index += 1;
+      continue;
+    }
+
+    if (arg === "--gh-user") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --gh-user.");
+      }
+      githubUser = parseGithubUser(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--gh-user=")) {
+      githubUser = parseGithubUser(arg.slice("--gh-user=".length));
+      continue;
+    }
+
+    if (arg === "--gh-host") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --gh-host.");
+      }
+      githubHost = parseGithubHost(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--gh-host=")) {
+      githubHost = parseGithubHost(arg.slice("--gh-host=".length));
       continue;
     }
 
@@ -322,6 +362,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The templates command does not accept --ssh-public-key.");
   }
 
+  if (command !== "up" && command !== "rebuild" && githubUser !== undefined) {
+    throw new UserError(`The ${command} command does not accept --gh-user.`);
+  }
+
+  if (command !== "up" && command !== "rebuild" && githubHost !== undefined) {
+    throw new UserError(`The ${command} command does not accept --gh-host.`);
+  }
+
   if (command === "status" && allowMissingSsh) {
     throw new UserError("The status command does not accept --allow-missing-ssh.");
   }
@@ -362,18 +410,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The templates command does not accept --template.");
   }
 
-  if (devcontainerSubpath || sshPublicKeyPath || templateName) {
-    return {
-      command,
-      port,
-      allowMissingSsh,
-      ...(devcontainerSubpath ? { devcontainerSubpath } : {}),
-      ...(sshPublicKeyPath ? { sshPublicKeyPath } : {}),
-      ...(templateName ? { templateName } : {}),
-    };
-  }
-
-  return { command, port, allowMissingSsh };
+  return {
+    command,
+    port,
+    allowMissingSsh,
+    ...(devcontainerSubpath ? { devcontainerSubpath } : {}),
+    ...(sshPublicKeyPath ? { sshPublicKeyPath } : {}),
+    ...(templateName ? { templateName } : {}),
+    ...(githubUser ? { githubUser } : {}),
+    ...(githubHost ? { githubHost } : {}),
+  };
 }
 
 export function parsePort(raw: string): number {
@@ -387,6 +433,24 @@ export function parsePort(raw: string): number {
   }
 
   return port;
+}
+
+function parseGithubUser(raw: string): string {
+  const value = raw.trim();
+  if (!value || /\s/.test(value)) {
+    throw new UserError(`Invalid GitHub user: ${raw}`);
+  }
+
+  return value;
+}
+
+function parseGithubHost(raw: string): string {
+  const value = raw.trim();
+  if (!value || /\s/.test(value) || value.includes("/") || value.includes(":")) {
+    throw new UserError(`Invalid GitHub host: ${raw}`);
+  }
+
+  return value;
 }
 
 export function hashWorkspacePath(workspacePath: string): string {
@@ -668,6 +732,7 @@ export function createWorkspaceState(input: {
   userDataDir: string;
   labels: Record<string, string>;
   template: WorkspaceTemplateState | null;
+  githubAuth: GithubAuthPreference | null;
   containerId?: string;
 }): WorkspaceState {
   return {
@@ -681,6 +746,7 @@ export function createWorkspaceState(input: {
     labels: input.labels,
     userDataDir: input.userDataDir,
     template: input.template ? cloneTemplateState(input.template) : null,
+    githubAuth: input.githubAuth ? { ...input.githubAuth } : null,
     lastContainerId: input.containerId,
     updatedAt: new Date().toISOString(),
   };
@@ -1063,6 +1129,7 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
 
   const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString();
   const lastContainerId = typeof record.lastContainerId === "string" ? record.lastContainerId : undefined;
+  const githubAuth = normalizeGithubAuthPreference(record.githubAuth);
 
   if (record.version === 1) {
     if (typeof record.sourceConfigPath !== "string") {
@@ -1080,6 +1147,7 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
       labels: record.labels as Record<string, string>,
       userDataDir: record.userDataDir,
       template: null,
+      githubAuth: null,
       lastContainerId,
       updatedAt,
     };
@@ -1109,9 +1177,29 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     labels: record.labels as Record<string, string>,
     userDataDir: record.userDataDir,
     template: (record.template as WorkspaceTemplateState | null | undefined) ?? null,
+    githubAuth,
     lastContainerId,
     updatedAt,
   };
+}
+
+function normalizeGithubAuthPreference(value: unknown): GithubAuthPreference | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.host !== "string" || typeof record.user !== "string") {
+    return null;
+  }
+
+  const host = record.host.trim();
+  const user = record.user.trim();
+  if (!host || !user) {
+    return null;
+  }
+
+  return { host, user };
 }
 
 function cloneTemplateState(template: WorkspaceTemplateState): WorkspaceTemplateState {

@@ -14,6 +14,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Shares a usable SSH agent socket with the container and copies a validated, non-empty `known_hosts` snapshot into the container.
 - Exposes the SSH service on the chosen host port and, when a host public key is available, installs it for key-based SSH login inside the devcontainer.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
+- Injects `GH_TOKEN` from the GitHub CLI when available, optionally using a persisted per-workspace `gh` account.
 - Runs devbox's bundled SSH server setup script inside the devcontainer.
 - Stores devbox-owned state, SSH credentials, SSH metadata, and SSH host keys under the workspace-local `.devbox/` directory so they survive `down` / `rebuild`.
 
@@ -65,6 +66,12 @@ devbox up <port> --allow-missing-ssh
 # Override the public key installed for SSH login inside the container
 devbox up <port> --ssh-public-key ~/.ssh/work-devbox.pub
 
+# Use a specific GitHub CLI account for GH_TOKEN injection and persist it for this workspace
+devbox up --gh-user work-account
+
+# Use an account on a non-default GitHub host
+devbox up --gh-user work-account --gh-host github.example.com
+
 # Use a specific devcontainer under .devcontainer/services/api
 devbox up <port> --devcontainer-subpath services/api
 
@@ -100,6 +107,8 @@ When you run `devbox rebuild`, omitting the port reuses the last stored port for
 
 `devbox rebuild` reuses the previously selected source for the workspace. If the workspace was started from `--template`, rebuild uses that saved template again. `rebuild --template ...` is intentionally not supported.
 
+GitHub CLI authentication for `GH_TOKEN` injection can be pinned per workspace with `--gh-user <login>` and optional `--gh-host <host>`. Devbox stores only the selected account metadata in `.devbox/state.json` as `githubAuth`; it does not store the token. Later `up`, `rebuild`, and `arise` runs reuse that account by calling `gh auth token --hostname <host> --user <login>`. The selection precedence is: explicit flags, `DEVBOX_GH_USER` / `DEVBOX_GH_HOST`, saved `.devbox/state.json`, then the currently active `gh` account.
+
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
 
 `devbox status` always prints JSON so it can be used directly from scripts and automation.
@@ -134,6 +143,10 @@ Example:
   "sshUser": "root",
   "sshPort": 5001,
   "remoteUser": "vscode",
+  "githubAuth": {
+    "host": "github.com",
+    "user": "work-account"
+  },
   "hasStateFile": true,
   "hasCredentialFile": true,
   "hasSshMetadataFile": true,
@@ -141,7 +154,7 @@ Example:
 }
 ```
 
-The full payload also includes useful diagnostic fields such as `workspaceHash`, `labels`, `publishedPorts`, `statePath`, `credentialPath`, `sshMetadataPath`, `updatedAt`, and the stored/generated config paths. Devbox-owned state paths point inside the current workspace's `.devbox/` directory.
+The full payload also includes useful diagnostic fields such as `workspaceHash`, `labels`, `publishedPorts`, `statePath`, `credentialPath`, `sshMetadataPath`, `updatedAt`, `githubAuth`, and the stored/generated config paths. Devbox-owned state paths point inside the current workspace's `.devbox/` directory.
 
 When available, the status payload also includes `publicKeyConfigured` and `publicKeySource` so automation can tell whether devbox installed a host SSH public key for key-based login.
 
@@ -194,8 +207,10 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - When `devbox` uses a repo devcontainer, the generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - When `devbox` uses `--template`, it writes the generated config to `.devbox/.devcontainer.json` instead of creating a source devcontainer definition inside the repo.
 - `.devbox/` contains all devbox-owned local state (`state.json`, `user-data/`, template generated configs, and `ssh/`) and should stay ignored by version control.
+- `.devbox/state.json` may include `githubAuth: { "host": "...", "user": "..." }` so tools can detect or preserve the GitHub CLI account devbox will use for future `GH_TOKEN` injection.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `--template <name>` explicitly chooses a built-in template, even if the repo already has a devcontainer definition.
+- `--gh-user <login>` and `--gh-host <host>` select the GitHub CLI account used for `GH_TOKEN` injection without changing the globally active `gh` account.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
 - `devbox status` reports live container state when available and falls back to saved workspace state in `.devbox/state.json` plus the persisted `.devbox/ssh/credentials` password file and `.devbox/ssh/metadata.json` metadata when the container is stopped or Docker is unavailable.
 - `devbox arise` only attempts workspaces it can recover from stopped managed containers and that still have at least one persisted devbox leftover, such as saved state, `.devbox/ssh/credentials`, `.devbox/ssh/metadata.json`, or `.devbox/ssh/host-keys/`.
