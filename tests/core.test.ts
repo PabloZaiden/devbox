@@ -315,6 +315,36 @@ describe("loadWorkspaceState", () => {
       githubAuth: { host: "github.com", user: "work-account" },
     });
   });
+
+  test("drops invalid persisted GitHub auth preferences", async () => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
+    tempPaths.push(workspacePath);
+
+    const statePath = getWorkspaceStateFile(workspacePath);
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        version: STATE_VERSION,
+        workspacePath,
+        workspaceHash: "hash",
+        port: 5001,
+        configSource: "repo",
+        sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+        generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
+        labels: { managed: "true" },
+        userDataDir: path.join(workspacePath, ".devbox", "user-data"),
+        template: null,
+        githubAuth: { host: "https://github.com", user: "not valid" },
+        updatedAt: "2026-04-23T00:00:00.000Z",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(loadWorkspaceState(workspacePath)).resolves.toMatchObject({
+      githubAuth: null,
+    });
+  });
 });
 
 describe("resolveUpPortPreference", () => {

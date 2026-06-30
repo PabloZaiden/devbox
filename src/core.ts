@@ -435,7 +435,7 @@ export function parsePort(raw: string): number {
   return port;
 }
 
-function parseGithubUser(raw: string): string {
+export function parseGithubUser(raw: string): string {
   const value = raw.trim();
   if (!value || /\s/.test(value)) {
     throw new UserError(`Invalid GitHub user: ${raw}`);
@@ -444,13 +444,31 @@ function parseGithubUser(raw: string): string {
   return value;
 }
 
-function parseGithubHost(raw: string): string {
+export function parseGithubHost(raw: string): string {
   const value = raw.trim();
   if (!value || /\s/.test(value) || value.includes("/") || value.includes(":")) {
     throw new UserError(`Invalid GitHub host: ${raw}`);
   }
 
   return value;
+}
+
+function isValidGithubUser(raw: string): boolean {
+  try {
+    parseGithubUser(raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isValidGithubHost(raw: string): boolean {
+  try {
+    parseGithubHost(raw);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function hashWorkspacePath(workspacePath: string): string {
@@ -1193,13 +1211,11 @@ function normalizeGithubAuthPreference(value: unknown): GithubAuthPreference | n
     return null;
   }
 
-  const host = record.host.trim();
-  const user = record.user.trim();
-  if (!host || !user) {
+  if (!isValidGithubHost(record.host) || !isValidGithubUser(record.user)) {
     return null;
   }
 
-  return { host, user };
+  return { host: record.host.trim(), user: record.user.trim() };
 }
 
 function cloneTemplateState(template: WorkspaceTemplateState): WorkspaceTemplateState {

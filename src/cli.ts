@@ -11,6 +11,8 @@ import {
   getManagedPortFromContainerName,
   getManagedLabels,
   prepareKnownHostsMount,
+  parseGithubHost,
+  parseGithubUser,
   getWorkspaceSshMetadataFile,
   getWorkspaceStateDir,
   getWorkspaceUserDataDir,
@@ -457,17 +459,20 @@ function resolveGithubAuthPreference(input: {
   state: Awaited<ReturnType<typeof loadWorkspaceState>>;
   env: Record<string, string | undefined>;
 }): GithubAuthPreference | null {
-  const envUser = input.env.DEVBOX_GH_USER?.trim() || undefined;
-  const envHost = input.env.DEVBOX_GH_HOST?.trim() || undefined;
+  const envUser = input.env.DEVBOX_GH_USER ? parseGithubUser(input.env.DEVBOX_GH_USER) : undefined;
+  const envHost = input.env.DEVBOX_GH_HOST ? parseGithubHost(input.env.DEVBOX_GH_HOST) : undefined;
   const user = input.explicitUser ?? envUser ?? input.state?.githubAuth?.user;
 
   if (!user) {
+    if (input.explicitHost || envHost) {
+      throw new UserError("A GitHub user is required when selecting a GitHub host. Pass --gh-user or set DEVBOX_GH_USER.");
+    }
     return null;
   }
 
   return {
-    user,
-    host: input.explicitHost ?? envHost ?? input.state?.githubAuth?.host ?? "github.com",
+    user: parseGithubUser(user),
+    host: parseGithubHost(input.explicitHost ?? envHost ?? input.state?.githubAuth?.host ?? "github.com"),
   };
 }
 
