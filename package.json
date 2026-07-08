@@ -23,7 +23,8 @@
     "build:release": "rm -rf dist && mkdir -p dist && bun build --compile --target=$BUN_TARGET --outfile dist/devbox-$RELEASE_TARGET src/cli.ts && chmod +x dist/devbox-$RELEASE_TARGET",
     "dev": "bun run src/cli.ts",
     "test": "bun test",
-    "test:fast": "DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 bun test"
+    "test:fast": "DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 bun test",
+    "validate:release-version": "bun run scripts/validate-release-version.ts"
   },
   "dependencies": {
     "@pablozaiden/installer": "0.0.6",
