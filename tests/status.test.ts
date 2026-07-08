@@ -81,6 +81,7 @@ describe("getDevboxStatus", () => {
         state,
       },
       {
+        isDockerAvailable: () => true,
         listManagedContainers: async () => containers.map((container) => container.Id),
         inspectContainers: async () => containers,
         readFile: async (filePath) => {
@@ -135,6 +136,7 @@ describe("getDevboxStatus", () => {
         state: null,
       },
       {
+        isDockerAvailable: () => true,
         listManagedContainers: async () => [],
         inspectContainers: async () => [],
         readFile: async (filePath) => {
@@ -283,6 +285,7 @@ describe("getDevboxStatus", () => {
         },
       },
       {
+        isDockerAvailable: () => true,
         listManagedContainers: async () => [],
         inspectContainers: async () => [],
         readFile: async () => {
@@ -319,6 +322,7 @@ describe("getDevboxStatus", () => {
         },
       },
       {
+        isDockerAvailable: () => true,
         listManagedContainers: async () => ["container-1"],
         inspectContainers: async () => [
           {
@@ -380,6 +384,7 @@ describe("getDevboxStatus", () => {
         },
       },
       {
+        isDockerAvailable: () => true,
         listManagedContainers: async () => ["container-1"],
         inspectContainers: async () => [
           {
