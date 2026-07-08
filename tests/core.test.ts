@@ -221,6 +221,16 @@ describe("helpText", () => {
     expect(text).toContain("down");
     expect(text).toContain("help");
   });
+
+  test("mentions ubuntu fallback for up and rebuild", () => {
+    const text = helpText();
+    expect(text).toContain(
+      "\n  up         Start or reuse the managed devcontainer; falls back to the ubuntu template when none is found.",
+    );
+    expect(text).toContain(
+      "\n  rebuild    Recreate the managed devcontainer; falls back to the ubuntu template when no repo devcontainer or prior state exists.",
+    );
+  });
 });
 
 describe("resolvePort", () => {

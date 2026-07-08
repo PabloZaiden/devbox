@@ -137,7 +137,41 @@ export class UserError extends Error {
 }
 
 export function helpText(): string {
-  return `${CLI_NAME} v${pkg.version} - manage a devcontainer plus a bundled SSH server\n\nUsage:\n  ${CLI_NAME}\n  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]\n  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]\n  ${CLI_NAME} shell\n  ${CLI_NAME} status\n  ${CLI_NAME} templates\n  ${CLI_NAME} arise\n  ${CLI_NAME} down [--devcontainer-subpath <subpath>]\n  ${CLI_NAME} help\n  ${CLI_NAME} --help\n\nCommands:\n  up         Start or reuse the managed devcontainer; falls back to the ubuntu template when none is found.\n  rebuild    Recreate the managed devcontainer.\n  shell      Open an interactive shell in the running managed container.\n  status     Print JSON describing the managed devbox for this workspace.\n  templates  Print JSON describing the built-in templates.\n  arise      Restart stopped managed workspaces discovered from existing containers.\n  down       Stop and remove the managed container for this workspace.\n  help       Show this help.\n\nOptions:\n  -p, --port <port>               Publish the same port on host and container.\n  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.\n  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.\n  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.\n  --template <name>               Use a built-in template instead of a repo devcontainer.\n  --gh-user <login>               Use and persist a specific GitHub CLI account for GH_TOKEN injection.\n  --gh-host <host>                GitHub host for --gh-user. Defaults to github.com.\n  -h, --help                      Show this help.`;
+  return [
+    `${CLI_NAME} v${pkg.version} - manage a devcontainer plus a bundled SSH server`,
+    "",
+    "Usage:",
+    `  ${CLI_NAME}`,
+    `  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]`,
+    `  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]`,
+    `  ${CLI_NAME} shell`,
+    `  ${CLI_NAME} status`,
+    `  ${CLI_NAME} templates`,
+    `  ${CLI_NAME} arise`,
+    `  ${CLI_NAME} down [--devcontainer-subpath <subpath>]`,
+    `  ${CLI_NAME} help`,
+    `  ${CLI_NAME} --help`,
+    "",
+    "Commands:",
+    "  up         Start or reuse the managed devcontainer; falls back to the ubuntu template when none is found.",
+    "  rebuild    Recreate the managed devcontainer; falls back to the ubuntu template when no repo devcontainer or prior state exists.",
+    "  shell      Open an interactive shell in the running managed container.",
+    "  status     Print JSON describing the managed devbox for this workspace.",
+    "  templates  Print JSON describing the built-in templates.",
+    "  arise      Restart stopped managed workspaces discovered from existing containers.",
+    "  down       Stop and remove the managed container for this workspace.",
+    "  help       Show this help.",
+    "",
+    "Options:",
+    "  -p, --port <port>               Publish the same port on host and container.",
+    "  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.",
+    "  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.",
+    "  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.",
+    "  --template <name>               Use a built-in template instead of a repo devcontainer.",
+    "  --gh-user <login>               Use and persist a specific GitHub CLI account for GH_TOKEN injection.",
+    "  --gh-host <host>                GitHub host for --gh-user. Defaults to github.com.",
+    "  -h, --help                      Show this help.",
+  ].join("\n");
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
