@@ -1,7 +1,7 @@
 import { readFile as readFileFromFs } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
-import type { ParseError } from "jsonc-parser";
+import type { ParseError } from "jsonc-parser/lib/esm/main.js";
 import {
   type DockerInspect,
   type GithubAuthPreference,

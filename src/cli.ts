@@ -68,6 +68,7 @@ import { createRunnerMetadata, serializeRunnerMetadata } from "./runnerState";
 import { getDevboxStatus } from "./status";
 import { ariseManagedWorkspaces } from "./arise";
 import { listTemplateSummaries } from "./templates";
+import { runUpdateCommand } from "./update";
 
 async function main(): Promise<void> {
   const parsed = parseArgs(process.argv.slice(2));
@@ -83,6 +84,17 @@ async function main(): Promise<void> {
 
   if (parsed.command === "templates") {
     console.log(JSON.stringify(listTemplateSummaries(), null, 2));
+    return;
+  }
+
+  if (parsed.command === "update") {
+    const exitCode = await runUpdateCommand({
+      checkOnly: parsed.checkOnly ?? false,
+      version: parsed.version,
+    });
+    if (exitCode !== 0) {
+      process.exitCode = exitCode;
+    }
     return;
   }
 

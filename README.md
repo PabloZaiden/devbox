@@ -20,26 +20,27 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 
 ## Installation
 
-Install globally with Bun:
+Install `devbox` with the generic `@pablozaiden/installer` script:
 
 ```bash
-bun install -g @pablozaiden/devbox
+curl -fsSL https://raw.githubusercontent.com/pablozaiden/installer/main/install.sh | sh -s -- pablozaiden/devbox
 ```
 
-Or install globally with npm:
-
-```bash
-npm install -g @pablozaiden/devbox
-```
-
-After either install, `devbox` is available in any directory.
+The installer downloads the Linux or macOS binary for your CPU architecture, verifies the published `.sha256` checksum, and installs it into `$HOME/.local/bin` by default. Add that directory to `PATH` if the installer reports it is not already available.
 
 Run `devbox` with no arguments to see the CLI help.
+
+To update an installed binary later:
+
+```bash
+devbox update
+```
+
+Use `devbox update --check` to check for a newer release without installing it, or `devbox update --version <version>` to install a specific release.
 
 ## Requirements
 
 - macOS or Linux
-- [Node.js](https://nodejs.org/) or [Bun](https://bun.sh/) to run the installed CLI
 - Docker
 - Dev Container CLI available as `devcontainer` in whatever environment runs `devbox`
 - For SSH agent sharing: either a valid host `SSH_AUTH_SOCK`, or Docker Desktop host services
@@ -77,6 +78,9 @@ devbox up <port> --devcontainer-subpath services/api
 
 # Start from a specific built-in template instead of a repo devcontainer
 devbox up --template python
+
+# Check for and install newer devbox release binaries
+devbox update
 
 # List the built-in templates as JSON
 devbox templates
@@ -181,25 +185,25 @@ Use `bun test tests/examples.live.test.ts` to run only the live example-devconta
 
 Use `bun run test:fast` if you want the non-live suite only, or run `DEVBOX_SKIP_LIVE_EXAMPLE_TESTS=1 bun test` directly.
 
-The build step emits a bundled executable JS entrypoint at `dist/devbox.js`.
+The build step emits a standalone Bun-compiled binary at `dist/devbox`.
 
 For local development from this repository:
 
 - use `bun run src/cli.ts` while iterating on source changes
-- use `./dist/devbox.js` after `bun run build` to exercise the packaged artifact
+- use `./dist/devbox` after `bun run build` to exercise the packaged artifact
 
 For a quick smoke test, this repository includes `examples/smoke-workspace/.devcontainer/devcontainer.json`, which also exercises the Docker-in-Docker path:
 
 ```bash
 cd examples/smoke-workspace
-../../dist/devbox.js up --allow-missing-ssh
+../../dist/devbox up --allow-missing-ssh
 ```
 
 For a more realistic feature-heavy example, this repository also includes `examples/complex-workspace/.devcontainer/devcontainer.json`:
 
 ```bash
 cd examples/complex-workspace
-../../dist/devbox.js up
+../../dist/devbox up
 ```
 
 The complex example uses several devcontainer features, so the first `up` or `rebuild` can take a while. `devbox` prints periodic elapsed-time progress lines while the devcontainer image/features are still being prepared and while the SSH runner is being installed.

@@ -246,7 +246,11 @@ describe("example workspaces (real devcontainers)", () => {
       expect(gitUserEmailInContainer.stdout.trim()).toBe("example@author.test");
 
       const knownHostsInContainer = execInContainer(fixture, firstContainerId, "cat ~/.ssh/known_hosts");
-      expect(knownHostsInContainer.stdout).toBe(fixture.knownHostsContent);
+      const knownHostsContent = fixture.knownHostsContent;
+      if (knownHostsContent === null) {
+        throw new Error("Expected known_hosts content.");
+      }
+      expect(knownHostsInContainer.stdout).toBe(knownHostsContent);
 
       const sshAuthSockInContainer = execInContainer(
         fixture,
@@ -254,7 +258,11 @@ describe("example workspaces (real devcontainers)", () => {
         'printf "%s" "${SSH_AUTH_SOCK:-}" && test -S "${SSH_AUTH_SOCK:-/missing}"',
       );
       expect(sshAuthSockInContainer.exitCode).toBe(0);
-      expect(sshAuthSockInContainer.stdout).toBe(fixture.expectedContainerSshAuthSockPath);
+      const expectedContainerSshAuthSockPath = fixture.expectedContainerSshAuthSockPath;
+      if (expectedContainerSshAuthSockPath === null) {
+        throw new Error("Expected a container SSH auth sock path.");
+      }
+      expect(sshAuthSockInContainer.stdout).toBe(expectedContainerSshAuthSockPath);
 
       const hostKeyInContainer = execInContainerAsRoot(fixture, firstContainerId, "find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key' | head -n 1");
       expect(hostKeyInContainer.stdout.trim().length).toBeGreaterThan(0);
