@@ -11,7 +11,7 @@ jobs:
       contents: write
     with:
       install_command: bun install --frozen-lockfile
-      prebuild_command: bun run validate:release-version && bun run test:fast
+      prebuild_command: bun run validate:release-version && bun run typecheck && bun run test:fast
       binaries: |
         [
           {

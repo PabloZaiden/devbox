@@ -172,12 +172,13 @@ If you run the project directly on the host instead of inside the repository dev
 
 ```bash
 bun install
+bun run typecheck
 bun test
 bun run test:fast
 bun run build
 ```
 
-Pull requests run the same test-and-build checks automatically through GitHub Actions.
+Pull requests run the same typecheck, test, and build checks automatically through GitHub Actions.
 
 `bun test` now includes the real example-workspace devcontainer integration tests by default, so it requires Docker and the Dev Container CLI to be available in the environment where the tests run.
 
