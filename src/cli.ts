@@ -167,6 +167,9 @@ async function handleUpLike(
     state,
     preferStateSource: command === "rebuild",
   });
+  if (resolvedConfig.templateSelection === "fallback") {
+    console.log("No devcontainer definition found; using built-in ubuntu template.");
+  }
   const generatedConfigPath = resolvedConfig.generatedConfigPath;
   const userDataDir = getWorkspaceUserDataDir(workspacePath);
   const preparedKnownHosts = await prepareKnownHostsMount({ userDataDir });

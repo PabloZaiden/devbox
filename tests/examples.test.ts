@@ -527,7 +527,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(commandsAfterDown.filter((entry) => entry.tool === "docker" && entry.args[0] === "rm").length).toBeGreaterThanOrEqual(2);
   });
 
-  test("template-backed workspace lists templates, starts without a repo devcontainer, and rebuilds from saved state", async () => {
+  test("template-backed workspace lists templates, falls back to ubuntu, and rebuilds from saved state", async () => {
     const fixture = await setupExampleFixture("template-workspace");
 
     const templates = runCli(fixture, ["templates"]);
@@ -536,9 +536,10 @@ describe("example workspaces (simulated host tools)", () => {
     expect(templateList.some((entry: { name: string }) => entry.name === "ubuntu")).toBe(true);
     expect(templateList.some((entry: { name: string }) => entry.name === "typescript")).toBe(true);
 
-    const up = runCli(fixture, ["up", "--template", "ubuntu", "--allow-missing-ssh"]);
+    const up = runCli(fixture, ["up", "--allow-missing-ssh"]);
     expect(up.exitCode).toBe(0);
     expect(up.stdout).toContain("Using port 5001.");
+    expect(up.stdout).toContain("No devcontainer definition found; using built-in ubuntu template.");
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
@@ -567,6 +568,7 @@ describe("example workspaces (simulated host tools)", () => {
     const rebuild = runCli(fixture, ["rebuild", "--allow-missing-ssh"]);
     expect(rebuild.exitCode).toBe(0);
     expect(rebuild.stdout).toContain("Using port 5001.");
+    expect(rebuild.stdout).not.toContain("No devcontainer definition found; using built-in ubuntu template.");
     expect(rebuild.stdout).toContain("Ready.");
 
     const rebuildWithTemplate = runCli(fixture, ["rebuild", "--template", "python"]);
@@ -584,6 +586,48 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stoppedStatus.hasStateFile).toBe(true);
     expect(stoppedStatus.configSource).toBe("template");
     expect(stoppedStatus.templateName).toBe("ubuntu");
+  });
+
+  test("rebuild without prior state falls back to ubuntu when a port is provided", async () => {
+    const fixture = await setupExampleFixture("template-workspace");
+
+    const rebuild = runCli(fixture, ["rebuild", "5010", "--allow-missing-ssh"]);
+    expect(rebuild.exitCode).toBe(0);
+    expect(rebuild.stdout).toContain("Using port 5010.");
+    expect(rebuild.stdout).toContain("No devcontainer definition found; using built-in ubuntu template.");
+    expect(existsSync(fixture.generatedConfigPath)).toBe(true);
+
+    const state = await readJson(fixture.statePath);
+    expect(state.port).toBe(5010);
+    expect(state.configSource).toBe("template");
+    expect(state.sourceConfigPath).toBeNull();
+    expect(state.template.name).toBe("ubuntu");
+  });
+
+  test("workspace without a repo devcontainer reuses a saved non-ubuntu template", async () => {
+    const fixture = await setupExampleFixture("template-workspace");
+
+    const explicitTemplateUp = runCli(fixture, ["up", "--template", "python", "--allow-missing-ssh"]);
+    expect(explicitTemplateUp.exitCode).toBe(0);
+    expect(explicitTemplateUp.stdout).not.toContain("No devcontainer definition found; using built-in ubuntu template.");
+
+    const down = runCli(fixture, ["down"]);
+    expect(down.exitCode).toBe(0);
+
+    const upFromState = runCli(fixture, ["up", "--allow-missing-ssh"]);
+    expect(upFromState.exitCode).toBe(0);
+    expect(upFromState.stdout).not.toContain("No devcontainer definition found; using built-in ubuntu template.");
+
+    const state = await readJson(fixture.statePath);
+    expect(state.configSource).toBe("template");
+    expect(state.sourceConfigPath).toBeNull();
+    expect(state.template.name).toBe("python");
+
+    const generatedConfig = await readJson(fixture.generatedConfigPath);
+    expect(generatedConfig.features).toEqual({
+      "ghcr.io/devcontainers/features/docker-in-docker:3": {},
+      "ghcr.io/devcontainers-extra/features/uv:1": {},
+    });
   });
 });
 

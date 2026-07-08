@@ -510,6 +510,7 @@ describe("resolveWorkspaceConfig", () => {
     });
     expect(upStyleResolution.configSource).toBe("repo");
     expect(upStyleResolution.sourceConfigPath).toBe(path.join(tempDir, ".devcontainer", "devcontainer.json"));
+    expect(upStyleResolution.templateSelection).toBeNull();
 
     const rebuildStyleResolution = await resolveWorkspaceConfig({
       workspacePath: tempDir,
@@ -520,6 +521,7 @@ describe("resolveWorkspaceConfig", () => {
     expect(rebuildStyleResolution.sourceConfigPath).toBeNull();
     expect(rebuildStyleResolution.generatedConfigPath).toBe(state.generatedConfigPath);
     expect(rebuildStyleResolution.template?.name).toBe("python");
+    expect(rebuildStyleResolution.templateSelection).toBe("state");
     expect(rebuildStyleResolution.config).toEqual({
       image: "mcr.microsoft.com/devcontainers/base:noble",
       features: {
@@ -561,6 +563,24 @@ describe("resolveWorkspaceConfig", () => {
 
     expect(resolution.generatedConfigPath).toBe(getTemplateGeneratedConfigPath(tempDir));
     expect(resolution.legacyGeneratedConfigPath).toBeNull();
+    expect(resolution.templateSelection).toBe("state");
+  });
+
+  test("falls back to the ubuntu template when no devcontainer or prior template state exists", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "devbox-test-"));
+    tempPaths.push(tempDir);
+
+    const resolution = await resolveWorkspaceConfig({
+      workspacePath: tempDir,
+      state: null,
+    });
+
+    expect(resolution.configSource).toBe("template");
+    expect(resolution.sourceConfigPath).toBeNull();
+    expect(resolution.generatedConfigPath).toBe(getTemplateGeneratedConfigPath(tempDir));
+    expect(resolution.legacyGeneratedConfigPath).toBeNull();
+    expect(resolution.template?.name).toBe("ubuntu");
+    expect(resolution.templateSelection).toBe("fallback");
   });
 });
 
