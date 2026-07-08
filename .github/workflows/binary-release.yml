@@ -1,0 +1,23 @@
+name: Binary Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  binaries:
+    uses: pablozaiden/installer/.github/workflows/reusable-binary-release.yml@2e28bc9fbf69385ac5172e526a1268f72db02363
+    permissions:
+      contents: write
+    with:
+      install_command: bun install --frozen-lockfile
+      prebuild_command: bun run test:fast
+      binaries: |
+        [
+          {
+            "name": "devbox",
+            "asset_prefix": "devbox",
+            "build_command": "bun build --compile --target=$BUN_TARGET --outfile dist/devbox-$RELEASE_TARGET src/cli.ts",
+            "output_path": "dist/devbox-$RELEASE_TARGET"
+          }
+        ]

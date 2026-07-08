@@ -4,8 +4,7 @@ import { access, chmod, lstat, mkdir, readFile, rm, writeFile } from "node:fs/pr
 import os from "node:os";
 import path from "node:path";
 import { parse as parseJsonc } from "jsonc-parser/lib/esm/main.js";
-import type { ParseError } from "jsonc-parser";
-import pkg from "../package.json";
+import type { ParseError } from "jsonc-parser/lib/esm/main.js";
 import {
   CLI_NAME,
   DEFAULT_UP_AUTO_PORT_START,
@@ -22,8 +21,9 @@ import {
   WORKSPACE_LABEL_KEY,
 } from "./constants";
 import { getTemplateDefinition } from "./templates";
+import { DEVBOX_VERSION } from "./version";
 
-export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "arise" | "templates" | "help";
+export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "arise" | "templates" | "update" | "help";
 
 export interface ParsedArgs {
   command: CommandName;
@@ -34,6 +34,8 @@ export interface ParsedArgs {
   templateName?: string;
   githubUser?: string;
   githubHost?: string;
+  checkOnly?: boolean;
+  version?: string;
 }
 
 export type DevcontainerConfig = Record<string, unknown>;
@@ -138,7 +140,7 @@ export class UserError extends Error {
 
 export function helpText(): string {
   return [
-    `${CLI_NAME} v${pkg.version} - manage a devcontainer plus a bundled SSH server`,
+    `${CLI_NAME} v${DEVBOX_VERSION} - manage a devcontainer plus a bundled SSH server`,
     "",
     "Usage:",
     `  ${CLI_NAME}`,
@@ -148,6 +150,7 @@ export function helpText(): string {
     `  ${CLI_NAME} status`,
     `  ${CLI_NAME} templates`,
     `  ${CLI_NAME} arise`,
+    `  ${CLI_NAME} update [--check] [--version <version>]`,
     `  ${CLI_NAME} down [--devcontainer-subpath <subpath>]`,
     `  ${CLI_NAME} help`,
     `  ${CLI_NAME} --help`,
@@ -159,6 +162,7 @@ export function helpText(): string {
     "  status     Print JSON describing the managed devbox for this workspace.",
     "  templates  Print JSON describing the built-in templates.",
     "  arise      Restart stopped managed workspaces discovered from existing containers.",
+    "  update     Check for or install newer devbox release binaries.",
     "  down       Stop and remove the managed container for this workspace.",
     "  help       Show this help.",
     "",
@@ -191,7 +195,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     first === "shell" ||
     first === "status" ||
     first === "arise" ||
-    first === "templates"
+    first === "templates" ||
+    first === "update"
   ) {
     command = first;
     args.shift();
@@ -210,6 +215,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let templateName: string | undefined;
   let githubUser: string | undefined;
   let githubHost: string | undefined;
+  let checkOnly = false;
+  let version: string | undefined;
   const positionals: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -221,6 +228,32 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--allow-missing-ssh") {
       allowMissingSsh = true;
+      continue;
+    }
+
+    if (arg === "--check") {
+      checkOnly = true;
+      continue;
+    }
+
+    if (arg === "--version") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --version.");
+      }
+      version = value.trim();
+      if (!version) {
+        throw new UserError("Expected a value after --version.");
+      }
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--version=")) {
+      version = arg.slice("--version=".length).trim();
+      if (!version) {
+        throw new UserError("Expected a value after --version.");
+      }
       continue;
     }
 
@@ -338,6 +371,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (command === "arise") {
       throw new UserError("The arise command does not accept a port.");
     }
+    if (command === "templates") {
+      throw new UserError("The templates command does not accept a port.");
+    }
+    if (command === "update") {
+      throw new UserError("The update command does not accept a port.");
+    }
     port = parsePort(positionals[0]);
   }
 
@@ -361,6 +400,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The templates command does not accept a port.");
   }
 
+  if (command === "update" && port !== undefined) {
+    throw new UserError("The update command does not accept a port.");
+  }
+
   if (command === "shell" && devcontainerSubpath !== undefined) {
     throw new UserError("The shell command does not accept --devcontainer-subpath.");
   }
@@ -375,6 +418,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (command === "templates" && devcontainerSubpath !== undefined) {
     throw new UserError("The templates command does not accept --devcontainer-subpath.");
+  }
+
+  if (command === "update" && devcontainerSubpath !== undefined) {
+    throw new UserError("The update command does not accept --devcontainer-subpath.");
   }
 
   if (command === "down" && sshPublicKeyPath !== undefined) {
@@ -397,6 +444,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The templates command does not accept --ssh-public-key.");
   }
 
+  if (command === "update" && sshPublicKeyPath !== undefined) {
+    throw new UserError("The update command does not accept --ssh-public-key.");
+  }
+
   if (command !== "up" && command !== "rebuild" && githubUser !== undefined) {
     throw new UserError(`The ${command} command does not accept --gh-user.`);
   }
@@ -415,6 +466,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   if (command === "templates" && allowMissingSsh) {
     throw new UserError("The templates command does not accept --allow-missing-ssh.");
+  }
+
+  if (command === "update" && allowMissingSsh) {
+    throw new UserError("The update command does not accept --allow-missing-ssh.");
   }
 
   if (templateName !== undefined && devcontainerSubpath !== undefined) {
@@ -445,6 +500,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The templates command does not accept --template.");
   }
 
+  if (command === "update" && templateName !== undefined) {
+    throw new UserError("The update command does not accept --template.");
+  }
+
+  if (command !== "update" && checkOnly) {
+    throw new UserError(`The ${command} command does not accept --check.`);
+  }
+
+  if (command !== "update" && version !== undefined) {
+    throw new UserError(`The ${command} command does not accept --version.`);
+  }
+
+  if (command === "update" && checkOnly && version !== undefined) {
+    throw new UserError("Cannot combine --check with --version.");
+  }
+
   return {
     command,
     port,
@@ -454,6 +525,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     ...(templateName ? { templateName } : {}),
     ...(githubUser ? { githubUser } : {}),
     ...(githubHost ? { githubHost } : {}),
+    ...(command === "update" ? { checkOnly } : {}),
+    ...(command === "update" && version !== undefined ? { version } : {}),
   };
 }
 

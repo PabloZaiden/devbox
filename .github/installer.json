@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "repo": "pablozaiden/devbox",
+  "installDir": "$HOME/.local/bin",
+  "binaries": [
+    {
+      "name": "devbox",
+      "assetPrefix": "devbox",
+      "postInstallMessage": "Run 'devbox --help' to see available commands."
+    }
+  ],
+  "checksums": {
+    "required": true,
+    "extension": ".sha256"
+  },
+  "platforms": {
+    "linux": ["x64", "arm64"],
+    "darwin": ["x64", "arm64"]
+  }
+}

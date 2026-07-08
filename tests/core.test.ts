@@ -74,6 +74,23 @@ describe("parseArgs", () => {
     expect(parseArgs(["templates"])).toEqual({ command: "templates", allowMissingSsh: false });
   });
 
+  test("supports the update subcommand", () => {
+    expect(parseArgs(["update"])).toEqual({ command: "update", allowMissingSsh: false, checkOnly: false });
+    expect(parseArgs(["update", "--check"])).toEqual({ command: "update", allowMissingSsh: false, checkOnly: true });
+    expect(parseArgs(["update", "--version", "v1.2.3"])).toEqual({
+      command: "update",
+      allowMissingSsh: false,
+      checkOnly: false,
+      version: "v1.2.3",
+    });
+    expect(parseArgs(["update", "--version=1.2.3"])).toEqual({
+      command: "update",
+      allowMissingSsh: false,
+      checkOnly: false,
+      version: "1.2.3",
+    });
+  });
+
   test("supports selecting a devcontainer subpath", () => {
     expect(parseArgs(["up", "5001", "--devcontainer-subpath", "services/api"])).toEqual({
       command: "up",
@@ -177,6 +194,29 @@ describe("parseArgs", () => {
     );
   });
 
+  test("update rejects unrelated options and invalid update option combinations", () => {
+    expect(() => parseArgs(["update", "5001"])).toThrow("The update command does not accept a port.");
+    expect(() => parseArgs(["update", "--allow-missing-ssh"])).toThrow(
+      "The update command does not accept --allow-missing-ssh.",
+    );
+    expect(() => parseArgs(["update", "--devcontainer-subpath", "services/api"])).toThrow(
+      "The update command does not accept --devcontainer-subpath.",
+    );
+    expect(() => parseArgs(["update", "--ssh-public-key", "/tmp/id_rsa.pub"])).toThrow(
+      "The update command does not accept --ssh-public-key.",
+    );
+    expect(() => parseArgs(["update", "--template", "python"])).toThrow(
+      "The update command does not accept --template.",
+    );
+    expect(() => parseArgs(["update", "--gh-user", "work"])).toThrow(
+      "The update command does not accept --gh-user.",
+    );
+    expect(() => parseArgs(["update", "--check", "--version", "1.2.3"])).toThrow(
+      "Cannot combine --check with --version.",
+    );
+    expect(() => parseArgs(["up", "--check"])).toThrow("The up command does not accept --check.");
+  });
+
   test("rebuild rejects --template", () => {
     expect(() => parseArgs(["rebuild", "--template", "go"])).toThrow("The rebuild command does not accept --template.");
   });
@@ -218,6 +258,7 @@ describe("helpText", () => {
     expect(text).toContain("status");
     expect(text).toContain("templates");
     expect(text).toContain("arise");
+    expect(text).toContain("update");
     expect(text).toContain("down");
     expect(text).toContain("help");
   });
@@ -358,7 +399,7 @@ describe("loadWorkspaceState", () => {
 });
 
 describe("resolveUpPortPreference", () => {
-  const state = {
+  const state: WorkspaceState = {
     version: 2,
     workspacePath: "/tmp/ws",
     workspaceHash: "hash",
