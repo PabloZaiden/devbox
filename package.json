@@ -28,7 +28,7 @@
     "validate:release-version": "bun run scripts/validate-release-version.ts"
   },
   "dependencies": {
-    "@pablozaiden/installer": "0.0.6",
+    "@pablozaiden/installer": "0.0.7",
     "jsonc-parser": "3.3.1"
   },
   "devDependencies": {
