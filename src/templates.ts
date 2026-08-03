@@ -28,11 +28,11 @@ export interface DevboxTemplateSummary {
 
 const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:noble";
 const BASE_NAME = "noble";
-const DOCKER_IN_DOCKER_FEATURE = "ghcr.io/devcontainers/features/docker-in-docker:3";
+const DOCKER_IN_DOCKER_FEATURE = "ghcr.io/devcontainers/features/docker-in-docker:4";
 const DOTNET_FEATURE = "ghcr.io/devcontainers/features/dotnet:2";
 const GO_FEATURE = "ghcr.io/devcontainers/features/go:1";
 const JAVA_FEATURE = "ghcr.io/devcontainers/features/java:1";
-const NODE_FEATURE = "ghcr.io/devcontainers/features/node:1";
+const NODE_FEATURE = "ghcr.io/devcontainers/features/node:2";
 const RUST_FEATURE = "ghcr.io/devcontainers/features/rust:1";
 const BUN_FEATURE = "ghcr.io/devcontainers-extra/features/bun:1";
 const UV_FEATURE = "ghcr.io/devcontainers-extra/features/uv:1";
