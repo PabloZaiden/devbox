@@ -476,12 +476,12 @@ describe("discoverDevcontainerConfig", () => {
     await mkdir(path.join(tempDir, ".devcontainer", "services", "api"), { recursive: true });
     await writeFile(
       path.join(tempDir, ".devcontainer", "services", "api", "devcontainer.json"),
-      `{ "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm" }`,
+      `{ "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-trixie" }`,
     );
 
     const discovered = await discoverDevcontainerConfig(tempDir, path.join("services", "api"));
     expect(discovered.path).toBe(path.join(tempDir, ".devcontainer", "services", "api", "devcontainer.json"));
-    expect(discovered.config.image).toBe("mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm");
+    expect(discovered.config.image).toBe("mcr.microsoft.com/devcontainers/typescript-node:1-22-trixie");
   });
 
   test("falls back to workspace-root .devcontainer.json by default", async () => {
