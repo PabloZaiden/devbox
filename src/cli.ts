@@ -180,7 +180,7 @@ async function handleUpLike(
     preferStateSource: command === "rebuild",
   });
   if (resolvedConfig.templateSelection === "fallback") {
-    console.log("No devcontainer definition found; using built-in ubuntu template.");
+    console.log("No devcontainer definition found; using built-in Debian Trixie template.");
   }
   const generatedConfigPath = resolvedConfig.generatedConfigPath;
   const userDataDir = getWorkspaceUserDataDir(workspacePath);

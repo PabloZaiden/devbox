@@ -26,8 +26,8 @@ export interface DevboxTemplateSummary {
   runnerCompatible: boolean;
 }
 
-const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:noble";
-const BASE_NAME = "noble";
+const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:trixie";
+const BASE_NAME = "trixie";
 const DOCKER_IN_DOCKER_FEATURE = "ghcr.io/devcontainers/features/docker-in-docker:4";
 const DOTNET_FEATURE = "ghcr.io/devcontainers/features/dotnet:2";
 const GO_FEATURE = "ghcr.io/devcontainers/features/go:1";
@@ -40,48 +40,48 @@ const UV_FEATURE = "ghcr.io/devcontainers-extra/features/uv:1";
 const TEMPLATE_DEFINITIONS: Record<string, DevboxTemplateDefinition> = {
   ubuntu: createTemplateDefinition({
     name: "ubuntu",
-    description: "Ubuntu noble base image with Docker-in-Docker preinstalled.",
-    runtimeVersion: "Ubuntu noble",
+    description: "Debian Trixie base image with Docker-in-Docker preinstalled.",
+    runtimeVersion: "Debian Trixie",
     languages: [],
   }),
   dotnet: createTemplateDefinition({
     name: "dotnet",
-    description: ".NET SDK on Ubuntu noble via the official devcontainer feature.",
+    description: ".NET SDK on Debian Trixie via the official devcontainer feature.",
     runtimeVersion: ".NET SDK",
     languages: ["dotnet", "csharp", "fsharp"],
     features: [DOTNET_FEATURE],
   }),
   typescript: createTemplateDefinition({
     name: "typescript",
-    description: "Node.js and Bun on Ubuntu noble via devcontainer features.",
+    description: "Node.js and Bun on Debian Trixie via devcontainer features.",
     runtimeVersion: "Node.js + Bun",
     languages: ["node", "bun", "typescript", "javascript"],
     features: [NODE_FEATURE, BUN_FEATURE],
   }),
   python: createTemplateDefinition({
     name: "python",
-    description: "Python workflows on Ubuntu noble via the uv feature.",
+    description: "Python workflows on Debian Trixie via the uv feature.",
     runtimeVersion: "Python via uv",
     languages: ["python"],
     features: [UV_FEATURE],
   }),
   go: createTemplateDefinition({
     name: "go",
-    description: "Go on Ubuntu noble via the official devcontainer feature.",
+    description: "Go on Debian Trixie via the official devcontainer feature.",
     runtimeVersion: "Go",
     languages: ["go"],
     features: [GO_FEATURE],
   }),
   rust: createTemplateDefinition({
     name: "rust",
-    description: "Rust on Ubuntu noble via the official devcontainer feature.",
+    description: "Rust on Debian Trixie via the official devcontainer feature.",
     runtimeVersion: "Rust",
     languages: ["rust"],
     features: [RUST_FEATURE],
   }),
   java: createTemplateDefinition({
     name: "java",
-    description: "Java on Ubuntu noble via the official devcontainer feature.",
+    description: "Java on Debian Trixie via the official devcontainer feature.",
     runtimeVersion: "Java",
     languages: ["java"],
     features: [JAVA_FEATURE],

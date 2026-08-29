@@ -386,7 +386,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(await readFile(String(fixture.sourceConfigPath), "utf8")).toBe(sourceBefore);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
-    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
+    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:trixie");
     expect(generatedConfig.features).toEqual({
       "ghcr.io/devcontainers/features/docker-in-docker:4": {},
     });
@@ -527,7 +527,7 @@ describe("example workspaces (simulated host tools)", () => {
     expect(commandsAfterDown.filter((entry) => entry.tool === "docker" && entry.args[0] === "rm").length).toBeGreaterThanOrEqual(2);
   });
 
-  test("template-backed workspace lists templates, falls back to ubuntu, and rebuilds from saved state", async () => {
+  test("template-backed workspace lists templates, falls back to the default template, and rebuilds from saved state", async () => {
     const fixture = await setupExampleFixture("template-workspace");
 
     const templates = runCli(fixture, ["templates"]);
@@ -539,11 +539,11 @@ describe("example workspaces (simulated host tools)", () => {
     const up = runCli(fixture, ["up", "--allow-missing-ssh"]);
     expect(up.exitCode).toBe(0);
     expect(up.stdout).toContain("Using port 5001.");
-    expect(up.stdout).toContain("No devcontainer definition found; using built-in ubuntu template.");
+    expect(up.stdout).toContain("No devcontainer definition found; using built-in Debian Trixie template.");
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
-    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
+    expect(generatedConfig.image).toBe("mcr.microsoft.com/devcontainers/base:trixie");
     expect(generatedConfig.features).toEqual({
       "ghcr.io/devcontainers/features/docker-in-docker:4": {},
     });
@@ -553,11 +553,11 @@ describe("example workspaces (simulated host tools)", () => {
     expect(state.configSource).toBe("template");
     expect(state.sourceConfigPath).toBeNull();
     expect(state.template.name).toBe("ubuntu");
-    expect(state.template.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
+    expect(state.template.image).toBe("mcr.microsoft.com/devcontainers/base:trixie");
     expect(state.template.pinnedReference).toBe(
-      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:4",
+      "mcr.microsoft.com/devcontainers/base:trixie + ghcr.io/devcontainers/features/docker-in-docker:4",
     );
-    expect(state.template.runtimeVersion).toBe("Ubuntu noble");
+    expect(state.template.runtimeVersion).toBe("Debian Trixie");
 
     const statusWhileRunning = runCli(fixture, ["status"]);
     expect(statusWhileRunning.exitCode).toBe(0);
@@ -568,7 +568,7 @@ describe("example workspaces (simulated host tools)", () => {
     const rebuild = runCli(fixture, ["rebuild", "--allow-missing-ssh"]);
     expect(rebuild.exitCode).toBe(0);
     expect(rebuild.stdout).toContain("Using port 5001.");
-    expect(rebuild.stdout).not.toContain("No devcontainer definition found; using built-in ubuntu template.");
+    expect(rebuild.stdout).not.toContain("No devcontainer definition found; using built-in Debian Trixie template.");
     expect(rebuild.stdout).toContain("Ready.");
 
     const rebuildWithTemplate = runCli(fixture, ["rebuild", "--template", "python"]);
@@ -588,13 +588,13 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stoppedStatus.templateName).toBe("ubuntu");
   });
 
-  test("rebuild without prior state falls back to ubuntu when a port is provided", async () => {
+  test("rebuild without prior state falls back to the default template when a port is provided", async () => {
     const fixture = await setupExampleFixture("template-workspace");
 
     const rebuild = runCli(fixture, ["rebuild", "5010", "--allow-missing-ssh"]);
     expect(rebuild.exitCode).toBe(0);
     expect(rebuild.stdout).toContain("Using port 5010.");
-    expect(rebuild.stdout).toContain("No devcontainer definition found; using built-in ubuntu template.");
+    expect(rebuild.stdout).toContain("No devcontainer definition found; using built-in Debian Trixie template.");
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const state = await readJson(fixture.statePath);
@@ -604,19 +604,19 @@ describe("example workspaces (simulated host tools)", () => {
     expect(state.template.name).toBe("ubuntu");
   });
 
-  test("workspace without a repo devcontainer reuses a saved non-ubuntu template", async () => {
+  test("workspace without a repo devcontainer reuses a saved non-default template", async () => {
     const fixture = await setupExampleFixture("template-workspace");
 
     const explicitTemplateUp = runCli(fixture, ["up", "--template", "python", "--allow-missing-ssh"]);
     expect(explicitTemplateUp.exitCode).toBe(0);
-    expect(explicitTemplateUp.stdout).not.toContain("No devcontainer definition found; using built-in ubuntu template.");
+    expect(explicitTemplateUp.stdout).not.toContain("No devcontainer definition found; using built-in Debian Trixie template.");
 
     const down = runCli(fixture, ["down"]);
     expect(down.exitCode).toBe(0);
 
     const upFromState = runCli(fixture, ["up", "--allow-missing-ssh"]);
     expect(upFromState.exitCode).toBe(0);
-    expect(upFromState.stdout).not.toContain("No devcontainer definition found; using built-in ubuntu template.");
+    expect(upFromState.stdout).not.toContain("No devcontainer definition found; using built-in Debian Trixie template.");
 
     const state = await readJson(fixture.statePath);
     expect(state.configSource).toBe("template");

@@ -88,13 +88,13 @@ afterEach(async () => {
 
 describe("example workspaces (real devcontainers)", () => {
   liveTest(
-    "template workspace falls back to the ubuntu template without a repo devcontainer",
+    "template workspace falls back to the Debian Trixie template without a repo devcontainer",
     async () => {
       const fixture = await setupLiveFixture("template-workspace");
       const up = runCli(fixture, ["up", "--allow-missing-ssh"]);
 
       expect(up.exitCode).toBe(0);
-      expect(up.stdout).toContain("No devcontainer definition found; using built-in ubuntu template.");
+      expect(up.stdout).toContain("No devcontainer definition found; using built-in Debian Trixie template.");
       expect(up.stdout).toContain("Devcontainer is ready");
       expect(up.stdout).toContain("SSH server:");
       expect(up.stdout).toContain("Ready.");

@@ -263,13 +263,13 @@ describe("helpText", () => {
     expect(text).toContain("help");
   });
 
-  test("mentions ubuntu fallback for up and rebuild", () => {
+  test("mentions the Debian Trixie fallback for up and rebuild", () => {
     const text = helpText();
     expect(text).toContain(
-      "\n  up         Start or reuse the managed devcontainer; falls back to the ubuntu template when none is found.",
+      "\n  up         Start or reuse the managed devcontainer; falls back to the built-in Debian Trixie template when none is found.",
     );
     expect(text).toContain(
-      "\n  rebuild    Recreate the managed devcontainer; falls back to the ubuntu template when no repo devcontainer or prior state exists.",
+      "\n  rebuild    Recreate the managed devcontainer; falls back to the built-in Debian Trixie template when no repo devcontainer or prior state exists.",
     );
   });
 });
@@ -574,7 +574,7 @@ describe("resolveWorkspaceConfig", () => {
     expect(rebuildStyleResolution.template?.name).toBe("python");
     expect(rebuildStyleResolution.templateSelection).toBe("state");
     expect(rebuildStyleResolution.config).toEqual({
-      image: "mcr.microsoft.com/devcontainers/base:noble",
+      image: "mcr.microsoft.com/devcontainers/base:trixie",
       features: {
         "ghcr.io/devcontainers/features/docker-in-docker:4": {},
         "ghcr.io/devcontainers-extra/features/uv:1": {},

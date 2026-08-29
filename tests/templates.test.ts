@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { getTemplateDefinition, listTemplateDefinitions, listTemplateSummaries } from "../src/templates";
 
 describe("built-in templates", () => {
-  test("standardizes every template on the noble base image with docker-in-docker", () => {
+  test("standardizes every template on the Trixie base image with docker-in-docker", () => {
     for (const template of listTemplateDefinitions()) {
-      expect(template.base).toBe("noble");
-      expect(template.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
-      expect(template.pinnedReference).toContain("mcr.microsoft.com/devcontainers/base:noble");
+      expect(template.base).toBe("trixie");
+      expect(template.image).toBe("mcr.microsoft.com/devcontainers/base:trixie");
+      expect(template.pinnedReference).toContain("mcr.microsoft.com/devcontainers/base:trixie");
       expect(template.config).toEqual(
         expect.objectContaining({
-          image: "mcr.microsoft.com/devcontainers/base:noble",
+          image: "mcr.microsoft.com/devcontainers/base:trixie",
           features: expect.objectContaining({
             "ghcr.io/devcontainers/features/docker-in-docker:4": {},
           }),
@@ -25,15 +25,15 @@ describe("built-in templates", () => {
       throw new Error("Expected the built-in typescript template to exist.");
     }
 
-    expect(template.description).toBe("Node.js and Bun on Ubuntu noble via devcontainer features.");
-    expect(template.base).toBe("noble");
-    expect(template.image).toBe("mcr.microsoft.com/devcontainers/base:noble");
+    expect(template.description).toBe("Node.js and Bun on Debian Trixie via devcontainer features.");
+    expect(template.base).toBe("trixie");
+    expect(template.image).toBe("mcr.microsoft.com/devcontainers/base:trixie");
     expect(template.pinnedReference).toBe(
-      "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:4 + ghcr.io/devcontainers/features/node:2 + ghcr.io/devcontainers-extra/features/bun:1",
+      "mcr.microsoft.com/devcontainers/base:trixie + ghcr.io/devcontainers/features/docker-in-docker:4 + ghcr.io/devcontainers/features/node:2 + ghcr.io/devcontainers-extra/features/bun:1",
     );
     expect(template.runnerCompatible).toBe(true);
     expect(template.config).toEqual({
-      image: "mcr.microsoft.com/devcontainers/base:noble",
+      image: "mcr.microsoft.com/devcontainers/base:trixie",
       features: {
         "ghcr.io/devcontainers/features/docker-in-docker:4": {},
         "ghcr.io/devcontainers/features/node:2": {},
@@ -46,12 +46,12 @@ describe("built-in templates", () => {
     const typescriptTemplate = listTemplateSummaries().find((template) => template.name === "typescript");
     expect(typescriptTemplate).toEqual({
       name: "typescript",
-      description: "Node.js and Bun on Ubuntu noble via devcontainer features.",
+      description: "Node.js and Bun on Debian Trixie via devcontainer features.",
       source: "built-in",
-      base: "noble",
-      image: "mcr.microsoft.com/devcontainers/base:noble",
+      base: "trixie",
+      image: "mcr.microsoft.com/devcontainers/base:trixie",
       pinnedReference:
-        "mcr.microsoft.com/devcontainers/base:noble + ghcr.io/devcontainers/features/docker-in-docker:4 + ghcr.io/devcontainers/features/node:2 + ghcr.io/devcontainers-extra/features/bun:1",
+        "mcr.microsoft.com/devcontainers/base:trixie + ghcr.io/devcontainers/features/docker-in-docker:4 + ghcr.io/devcontainers/features/node:2 + ghcr.io/devcontainers-extra/features/bun:1",
       runtimeVersion: "Node.js + Bun",
       languages: ["node", "bun", "typescript", "javascript"],
       runnerCompatible: true,

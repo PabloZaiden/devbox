@@ -6,7 +6,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 
 ## What it does
 
-- Discovers `.devcontainer/devcontainer.json` or `.devcontainer.json` in the current directory, can target `.devcontainer/<subpath>/devcontainer.json` with a flag, and falls back to the built-in `ubuntu` template when no repo devcontainer is present.
+- Discovers `.devcontainer/devcontainer.json` or `.devcontainer.json` in the current directory, can target `.devcontainer/<subpath>/devcontainer.json` with a flag, and falls back to the built-in Debian Trixie template when no repo devcontainer is present.
 - Reuses or creates the devcontainer with Docker + Dev Container CLI.
 - Names the managed container as `devbox-<project>-<port>`.
 - Publishes the same TCP port on host and container.
@@ -109,9 +109,9 @@ When you run `devbox up`, the port precedence is:
 
 When you run `devbox rebuild`, omitting the port reuses the last stored port for the current workspace.
 
-If no repo devcontainer is found and no previous template source is stored, `devbox up` automatically starts from the built-in `ubuntu` template. `devbox rebuild <port>` does the same when there is enough information to create the devbox but no prior workspace state exists. Devbox prints a message when this automatic fallback is used.
+If no repo devcontainer is found and no previous template source is stored, `devbox up` automatically starts from the built-in Debian Trixie template. `devbox rebuild <port>` does the same when there is enough information to create the devbox but no prior workspace state exists. Devbox prints a message when this automatic fallback is used.
 
-`devbox rebuild` reuses the previously selected source for the workspace. If the workspace was started from `--template` or the automatic Ubuntu fallback, rebuild uses that saved template again. `rebuild --template ...` is intentionally not supported.
+`devbox rebuild` reuses the previously selected source for the workspace. If the workspace was started from `--template` or the automatic Debian Trixie fallback, rebuild uses that saved template again. `rebuild --template ...` is intentionally not supported.
 
 GitHub CLI authentication for `GH_TOKEN` injection can be pinned per workspace with `--gh-user <login>` and optional `--gh-host <host>`. Devbox stores only the selected account metadata in `.devbox/state.json` as `githubAuth`; it does not store the token. Later `up`, `rebuild`, and `arise` runs reuse that account by calling `gh auth token --hostname <host> --user <login>`. The selection precedence is: explicit flags, `DEVBOX_GH_USER` / `DEVBOX_GH_HOST`, saved `.devbox/state.json`, then the currently active `gh` account.
 
@@ -123,7 +123,7 @@ GitHub CLI authentication for `GH_TOKEN` injection can be pinned per workspace w
 
 Built-in templates:
 
-- `ubuntu`
+- `ubuntu` (Debian Trixie base)
 - `dotnet`
 - `typescript`
 - `python`
@@ -216,7 +216,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - `.devbox/` contains all devbox-owned local state (`state.json`, `user-data/`, template generated configs, and `ssh/`) and should stay ignored by version control.
 - `.devbox/state.json` may include `githubAuth: { "host": "...", "user": "..." }` so tools can detect or preserve the GitHub CLI account devbox will use for future `GH_TOKEN` injection.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
-- `--template <name>` explicitly chooses a built-in template, even if the repo already has a devcontainer definition. If no repo devcontainer exists and no template was previously saved, omitting `--template` falls back to `ubuntu`.
+- `--template <name>` explicitly chooses a built-in template, even if the repo already has a devcontainer definition. If no repo devcontainer exists and no template was previously saved, omitting `--template` falls back to the `ubuntu` template identifier, which uses the Debian Trixie base.
 - `--gh-user <login>` and `--gh-host <host>` select the GitHub CLI account used for `GH_TOKEN` injection without changing the globally active `gh` account.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
 - `devbox status` reports live container state when available and falls back to saved workspace state in `.devbox/state.json` plus the persisted `.devbox/ssh/credentials` password file and `.devbox/ssh/metadata.json` metadata when the container is stopped or Docker is unavailable.
