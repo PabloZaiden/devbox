@@ -111,6 +111,8 @@ describe("getDevboxStatus", () => {
 
     expect(status.running).toBe(true);
     expect(status.port).toBe(5001);
+    expect(status.ports).toEqual([5001]);
+    expect(status.sshEnabled).toBe(true);
     expect(status.password).toBe("secret");
     expect(status.sshUser).toBe("vscode");
     expect(status.sshPort).toBe(5001);
@@ -127,6 +129,76 @@ describe("getDevboxStatus", () => {
     expect(status.warnings).toEqual([
       "Found 2 managed containers for this workspace; reporting the preferred container.",
     ]);
+  });
+
+  test("reports all published ports without exposing SSH details when SSH is disabled", async () => {
+    const state: WorkspaceState = {
+      version: 3,
+      workspacePath: "/tmp/no-ssh",
+      workspaceHash: "workspace-hash",
+      port: 5001,
+      ports: [5001, 5002],
+      sshEnabled: false,
+      configSource: "repo",
+      sourceConfigPath: "/tmp/no-ssh/.devcontainer/devcontainer.json",
+      generatedConfigPath: "/tmp/no-ssh/.devcontainer/.devcontainer.json",
+      labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
+      userDataDir: "/tmp/state",
+      template: null,
+      githubAuth: null,
+      lastContainerId: "container-no-ssh",
+      updatedAt: "2026-03-16T00:00:00.000Z",
+    };
+
+    const status = await getDevboxStatus(
+      { workspacePath: state.workspacePath, state },
+      {
+        isDockerAvailable: () => true,
+        listManagedContainers: async () => ["container-no-ssh"],
+        inspectContainers: async () => [
+          {
+            Id: "container-no-ssh",
+            Name: "/devbox-no-ssh-5001",
+            State: { Running: true, Status: "running" },
+            NetworkSettings: {
+              Ports: {
+                "5001/tcp": [{ HostIp: "0.0.0.0", HostPort: "15001" }],
+                "5002/tcp": [{ HostIp: "0.0.0.0", HostPort: "15002" }],
+              },
+            },
+          },
+        ],
+        readFile: async (filePath) => {
+          if (filePath === state.sourceConfigPath) {
+            return '{ "remoteUser": "vscode" }';
+          }
+          if (filePath.endsWith("/.devbox/ssh/credentials")) {
+            return "stale-password\n";
+          }
+          if (filePath.endsWith("/.devbox/ssh/metadata.json")) {
+            return "stale metadata";
+          }
+          const error = new Error(`Missing file: ${filePath}`) as Error & { code?: string };
+          error.code = "ENOENT";
+          throw error;
+        },
+      },
+    );
+
+    expect(status.running).toBe(true);
+    expect(status.port).toBe(15001);
+    expect(status.ports).toEqual([15001, 15002]);
+    expect(status.sshEnabled).toBe(false);
+    expect(status.password).toBeNull();
+    expect(status.sshUser).toBeNull();
+    expect(status.sshPort).toBeNull();
+    expect(status.permitRootLogin).toBeNull();
+    expect(status.publicKeyConfigured).toBeNull();
+    expect(status.publicKeySource).toBeNull();
+    expect(status.hasCredentialFile).toBe(true);
+    expect(status.hasSshMetadataFile).toBe(true);
+    expect(status.remoteUser).toBe("vscode");
+    expect(status.warnings).toEqual([]);
   });
 
   test("falls back to default workdir, password file, and metadata file without saved state", async () => {

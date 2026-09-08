@@ -9,6 +9,8 @@ import {
   getDefaultRemoteWorkspaceFolder,
   getManagedLabels,
   getManagedPortFromContainerName,
+  getWorkspacePorts,
+  getWorkspaceSshEnabled,
   getWorkspaceRunnerCredentialFile,
   getWorkspaceSshMetadataFile,
   getWorkspaceStateFile,
@@ -26,6 +28,8 @@ export interface DevboxStatusPortBinding {
 export interface DevboxStatus {
   running: boolean;
   port: number | null;
+  ports: number[];
+  sshEnabled: boolean;
   password: string | null;
   workdir: string;
   workdirSource: "config" | "default";
@@ -117,7 +121,8 @@ export async function getDevboxStatus(
   const credentialPath = getWorkspaceRunnerCredentialFile(input.workspacePath);
   const credentialFile = await readRunnerCredentialsFile(credentialPath, readFile);
   const sshMetadataPath = getWorkspaceSshMetadataFile(input.workspacePath);
-  const sshMetadataFile = await readRunnerMetadataFile(sshMetadataPath, readFile, warnings);
+  const sshEnabled = getWorkspaceSshEnabled(state);
+  const sshMetadataFile = await readRunnerMetadataFile(sshMetadataPath, readFile, sshEnabled ? warnings : []);
   const configHints = state?.template
     ? readConfigHintsFromConfig({
         config: state.template.config,
@@ -132,22 +137,30 @@ export async function getDevboxStatus(
         workspacePath: input.workspacePath,
       });
   const publishedPorts = getPublishedPorts(primaryContainer);
-  const configuredSshPort =
-    state?.port
-    ?? sshMetadataFile.value?.sshPort
-    ?? credentialFile.value?.sshPort
-    ?? getManagedPortFromContainerName(primaryContainer?.Name)
-    ?? null;
-  const effectivePort = configuredSshPort === null
-    ? firstPublishedHostPort(publishedPorts)
-    : getPublishedHostPortForPort(publishedPorts, configuredSshPort) ?? configuredSshPort;
-  const sshUser = sshMetadataFile.value?.sshUser ?? credentialFile.value?.user ?? null;
-  const permitRootLogin = sshMetadataFile.value?.permitRootLogin ?? credentialFile.value?.permitRootLogin ?? null;
-  const publicKeyConfigured = sshMetadataFile.value?.publicKeyConfigured ?? null;
-  const publicKeySource = sshMetadataFile.value?.publicKeySource ?? null;
-  const password = credentialFile.value?.password ?? null;
+  const configuredWorkspacePorts = getWorkspacePorts(state);
+  const configuredSshPort = sshEnabled
+    ? state?.port
+      ?? sshMetadataFile.value?.sshPort
+      ?? credentialFile.value?.sshPort
+      ?? getManagedPortFromContainerName(primaryContainer?.Name)
+      ?? null
+    : null;
+  const ports = resolveStatusPorts({
+    configuredWorkspacePorts,
+    configuredSshPort,
+    publishedPorts,
+  });
+  const effectivePort = ports[0] ?? null;
+  const sshUser = sshEnabled ? sshMetadataFile.value?.sshUser ?? credentialFile.value?.user ?? null : null;
+  const permitRootLogin = sshEnabled
+    ? sshMetadataFile.value?.permitRootLogin ?? credentialFile.value?.permitRootLogin ?? null
+    : null;
+  const publicKeyConfigured = sshEnabled ? sshMetadataFile.value?.publicKeyConfigured ?? null : null;
+  const publicKeySource = sshEnabled ? sshMetadataFile.value?.publicKeySource ?? null : null;
+  const password = sshEnabled ? credentialFile.value?.password ?? null : null;
   appendMissingDataWarnings({
     warnings,
+    sshEnabled,
     credentialFile,
     credentialPath,
     password,
@@ -164,6 +177,8 @@ export async function getDevboxStatus(
   return {
     running: Boolean(primaryContainer?.State?.Running),
     port: effectivePort,
+    ports,
+    sshEnabled,
     password,
     workdir: configHints.workdir ?? getDefaultRemoteWorkspaceFolder(input.workspacePath),
     workdirSource: configHints.workdirSource,
@@ -322,6 +337,7 @@ function readConfigHintsFromConfig(input: {
 
 function appendMissingDataWarnings(input: {
   warnings: string[];
+  sshEnabled: boolean;
   credentialFile: OptionalParsedFile<RunnerCredentials>;
   credentialPath: string;
   password: string | null;
@@ -334,6 +350,15 @@ function appendMissingDataWarnings(input: {
   publicKeySource: string | null;
   remoteUser: string | null;
 }): void {
+  if (!input.sshEnabled) {
+    if (input.remoteUser === null) {
+      input.warnings.push(
+        "`remoteUser` is unavailable because the devcontainer config does not set `remoteUser` or `containerUser`.",
+      );
+    }
+    return;
+  }
+
   if (!input.credentialFile.exists) {
     input.warnings.push(`Runner password file was not found: ${input.credentialPath}. \`password\` is unavailable.`);
   } else if (input.password === null) {
@@ -463,6 +488,23 @@ function getPublishedPorts(container: DockerInspect | null): Record<string, Devb
   return publishedPorts;
 }
 
+function resolveStatusPorts(input: {
+  configuredWorkspacePorts: number[];
+  configuredSshPort: number | null;
+  publishedPorts: Record<string, DevboxStatusPortBinding[]>;
+}): number[] {
+  const configuredPorts =
+    input.configuredWorkspacePorts.length > 0
+      ? input.configuredWorkspacePorts
+      : input.configuredSshPort !== null
+        ? [input.configuredSshPort]
+        : firstPublishedHostPorts(input.publishedPorts);
+
+  return configuredPorts.map(
+    (port) => getPublishedHostPortForPort(input.publishedPorts, port) ?? port,
+  );
+}
+
 function getPublishedHostPortForPort(
   publishedPorts: Record<string, DevboxStatusPortBinding[]>,
   port: number,
@@ -477,16 +519,16 @@ function getPublishedHostPortForPort(
   return null;
 }
 
-function firstPublishedHostPort(publishedPorts: Record<string, DevboxStatusPortBinding[]>): number | null {
+function firstPublishedHostPorts(publishedPorts: Record<string, DevboxStatusPortBinding[]>): number[] {
+  const ports: number[] = [];
   for (const bindings of Object.values(publishedPorts)) {
     for (const binding of bindings) {
-      if (binding.hostPort !== null) {
-        return binding.hostPort;
+      if (binding.hostPort !== null && !ports.includes(binding.hostPort)) {
+        ports.push(binding.hostPort);
       }
     }
   }
-
-  return null;
+  return ports;
 }
 
 function formatErrorMessage(error: unknown): string {

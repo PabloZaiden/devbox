@@ -103,6 +103,8 @@ describe("example workspaces (real devcontainers)", () => {
       const selectedPort = Number(state.port);
       const containerId = String(state.lastContainerId);
       expect(up.stdout).toContain(`Using port ${selectedPort}.`);
+      expect(state.ports).toEqual([selectedPort]);
+      expect(state.sshEnabled).toBe(true);
       expect(state.configSource).toBe("template");
       expect(state.sourceConfigPath).toBeNull();
       expect(state.template.name).toBe("ubuntu");
@@ -182,6 +184,95 @@ describe("example workspaces (real devcontainers)", () => {
       expect(existsSync(fixture.statePath)).toBe(true);
     },
     { timeout: 8 * 60_000 },
+  );
+
+  liveTest(
+    "publishes multiple real ports and uses the first port for the bundled SSH runner",
+    async () => {
+      const fixture = await setupLiveFixture("smoke-workspace");
+      const up = runCli(fixture, ["up", String(fixture.port), "--ports", "3", "--allow-missing-ssh"]);
+
+      expect(up.exitCode).toBe(0);
+      expect(up.stdout).toContain(`Using ports ${fixture.port},`);
+      expect(up.stdout).toContain(`SSH port: ${fixture.port}`);
+      expect(up.stdout).toContain("Ready.");
+
+      const state = await readJson(fixture.statePath);
+      const containerId = String(state.lastContainerId);
+      expect(state.ports).toHaveLength(3);
+      expect(state.ports[0]).toBe(fixture.port);
+      expect(state.sshEnabled).toBe(true);
+
+      const inspect = inspectContainer(fixture, containerId);
+      for (const port of state.ports as number[]) {
+        expect(getPublishedHostPort(inspect, port)).toBe(String(port));
+      }
+
+      const runnerMetadata = await readJson(fixture.runnerMetadataPath);
+      expectRunnerMetadata(runnerMetadata, fixture.port);
+      expect((runnerMetadata as { sshPort: number }).sshPort).toBe(fixture.port);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+      expect(await listManagedContainerIds(fixture)).toEqual([]);
+    },
+    { timeout: 10 * 60_000 },
+  );
+
+  liveTest(
+    "publishes multiple real ports without SSH and runs devbox exec with output and exit-code forwarding",
+    async () => {
+      const fixture = await setupLiveFixture("smoke-workspace");
+      const up = runCli(fixture, [
+        "up",
+        String(fixture.port),
+        "--ports",
+        "3",
+        "--no-ssh",
+        "--allow-missing-ssh",
+      ]);
+
+      expect(up.exitCode).toBe(0);
+      expect(up.stdout).toContain(`Using ports ${fixture.port},`);
+      expect(up.stdout).toContain("Bundled SSH server installation skipped");
+      expect(up.stdout).not.toContain("SSH server:");
+
+      const state = await readJson(fixture.statePath);
+      const containerId = String(state.lastContainerId);
+      expect(state.ports).toHaveLength(3);
+      expect(state.ports[0]).toBe(fixture.port);
+      expect(state.sshEnabled).toBe(false);
+
+      const inspect = inspectContainer(fixture, containerId);
+      for (const port of state.ports as number[]) {
+        expect(getPublishedHostPort(inspect, port)).toBe(String(port));
+      }
+      expect(existsSync(fixture.runnerCredPath)).toBe(false);
+      expect(existsSync(fixture.runnerMetadataPath)).toBe(false);
+      expect(existsSync(getWorkspaceRunnerHostKeysDir(fixture.workspacePath))).toBe(false);
+
+      const status = runCli(fixture, ["status"]);
+      expect(status.exitCode).toBe(0);
+      const statusPayload = JSON.parse(status.stdout);
+      expect(statusPayload.ports).toEqual(state.ports);
+      expect(statusPayload.sshEnabled).toBe(false);
+      expect(statusPayload.sshPort).toBeNull();
+
+      const exec = runCli(fixture, ["exec", "--", "printf", "%s:%s", "left", "right"]);
+      expect(exec.exitCode).toBe(0);
+      expect(exec.stdout).toBe("left:right");
+
+      const failedExec = runCli(fixture, ["exec", "--", "sh", "-lc", "exit 17"], true);
+      expect(failedExec.exitCode).toBe(17);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+
+      const missingExec = runCli(fixture, ["exec", "--", "printf", "not-running"], true);
+      expect(missingExec.exitCode).toBe(1);
+      expect(missingExec.stderr).toContain("No running managed container was found for this workspace.");
+    },
+    { timeout: 10 * 60_000 },
   );
 
   liveTest(
@@ -368,6 +459,9 @@ async function setupLiveFixture(exampleName: string, options: LiveFixtureOptions
   const workspaceCopyPath = path.join(tempRoot, exampleName);
   await cp(path.join(repoRoot, "examples", exampleName), workspaceCopyPath, { recursive: true });
   await resetWorkspaceArtifacts(workspaceCopyPath);
+  const devboxDir = path.join(workspaceCopyPath, ".devbox");
+  await mkdir(devboxDir, { recursive: true });
+  await chmod(devboxDir, 0o777);
 
   runCommand(["git", "init", workspaceCopyPath]);
   if (options.gitIdentity) {

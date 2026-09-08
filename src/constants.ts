@@ -11,4 +11,4 @@ export const DEVBOX_SSH_DIRNAME = "ssh";
 export const RUNNER_CRED_FILENAME = "credentials";
 export const DEVBOX_SSH_METADATA_FILENAME = "metadata.json";
 export const RUNNER_HOST_KEYS_DIRNAME = "host-keys";
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;

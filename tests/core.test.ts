@@ -21,8 +21,10 @@ import {
   parseArgs,
   prepareKnownHostsMount,
   loadWorkspaceState,
+  parsePortCount,
   resolveWorkspaceConfig,
   resolvePort,
+  resolveUpPortsPreference,
   resolveUpPortPreference,
   validateSupportedDevcontainerConfig,
   getWorkspaceStateFile,
@@ -58,8 +60,41 @@ describe("parseArgs", () => {
     });
   });
 
+  test("supports multiple ports and explicit SSH mode", () => {
+    expect(parseArgs(["up", "5001", "--ports", "3", "--no-ssh"])).toEqual({
+      command: "up",
+      port: 5001,
+      portCount: 3,
+      allowMissingSsh: false,
+      sshEnabled: false,
+    });
+    expect(parseArgs(["rebuild", "--ports=2", "--ssh"])).toEqual({
+      command: "rebuild",
+      portCount: 2,
+      allowMissingSsh: false,
+      sshEnabled: true,
+    });
+  });
+
   test("supports the shell subcommand", () => {
     expect(parseArgs(["shell"])).toEqual({ command: "shell", allowMissingSsh: false });
+  });
+
+  test("supports forwarding exec arguments without interpreting them", () => {
+    expect(parseArgs(["exec", "--", "npm", "run", "test", "--", "--watch"])).toEqual({
+      command: "exec",
+      allowMissingSsh: false,
+      execArgs: ["npm", "run", "test", "--", "--watch"],
+    });
+  });
+
+  test("requires a command for exec", () => {
+    expect(() => parseArgs(["exec"])).toThrow(
+      "The exec command requires a command. Usage: `devbox exec -- <command> [args...]`",
+    );
+    expect(() => parseArgs(["exec", "printf", "hello"])).toThrow(
+      "The exec command requires `--` before the command. Usage: `devbox exec -- <command> [args...]`",
+    );
   });
 
   test("supports the status subcommand", () => {
@@ -232,6 +267,15 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["up", "--gh-user", "not valid"])).toThrow("Invalid GitHub user:");
     expect(() => parseArgs(["up", "--gh-host", "https://github.com"])).toThrow("Invalid GitHub host:");
   });
+
+  test("rejects invalid port counts and conflicting SSH options", () => {
+    expect(() => parsePortCount("0")).toThrow("Port count must be between 1 and 65535.");
+    expect(() => parseArgs(["up", "--ports", "two"])).toThrow("Invalid port count:");
+    expect(() => parseArgs(["up", "--ssh", "--no-ssh"])).toThrow("Cannot combine --ssh with --no-ssh.");
+    expect(() => parseArgs(["up", "--no-ssh", "--ssh-public-key", "/tmp/id_rsa.pub"])).toThrow(
+      "--ssh-public-key cannot be combined with --no-ssh.",
+    );
+  });
 });
 
 describe("helpText", () => {
@@ -248,6 +292,9 @@ describe("helpText", () => {
     expect(text).toContain("Usage:");
     expect(text).toContain("Commands:");
     expect(text).toContain("Options:");
+    expect(text).toContain("--ports <count>");
+    expect(text).toContain("--no-ssh");
+    expect(text).toContain("--ssh");
   });
 
   test("lists all commands", () => {
@@ -255,6 +302,7 @@ describe("helpText", () => {
     expect(text).toContain("up");
     expect(text).toContain("rebuild");
     expect(text).toContain("shell");
+    expect(text).toContain("exec -- <command> [args...]");
     expect(text).toContain("status");
     expect(text).toContain("templates");
     expect(text).toContain("arise");
@@ -325,6 +373,8 @@ describe("loadWorkspaceState", () => {
       workspacePath,
       workspaceHash: "hash",
       port: 5001,
+      ports: [5001],
+      sshEnabled: true,
       configSource: "repo",
       sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
       generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
@@ -429,6 +479,27 @@ describe("resolveUpPortPreference", () => {
   test("returns undefined when up should auto-assign a new port", () => {
     expect(resolveUpPortPreference({ explicitPort: undefined, state: null, existingPublishedPort: undefined })).toBeUndefined();
   });
+
+  test("reuses all stored ports when the requested count matches", () => {
+    const multiPortState = { ...state, ports: [5003, 5004, 5006] };
+    expect(
+      resolveUpPortsPreference({
+        explicitPort: undefined,
+        portCount: 3,
+        state: multiPortState,
+      }),
+    ).toEqual([5003, 5004, 5006]);
+  });
+
+  test("uses the explicit first port and lets the caller assign the remaining ports", () => {
+    expect(
+      resolveUpPortsPreference({
+        explicitPort: 6000,
+        portCount: 3,
+        state: null,
+      }),
+    ).toEqual([6000]);
+  });
 });
 
 describe("getManagedPortFromContainerName", () => {
@@ -447,7 +518,7 @@ describe("getManagedPortFromContainerName", () => {
 describe("describeUpPortStrategy", () => {
   test("describes the stored-port reuse and auto-assignment behavior", () => {
     expect(describeUpPortStrategy()).toBe(
-      "Reuse the previous workspace port when available, otherwise auto-assign the first free port starting at 5001.",
+      "Reuse the previous workspace ports when available, otherwise auto-assign the first free port(s) starting at 5001.",
     );
   });
 });
@@ -730,6 +801,31 @@ describe("buildManagedConfig", () => {
     expect(managed.runArgs).toEqual(["-p", "5001:5001", "--name", "devbox-example-5001"]);
   });
 
+  test("publishes every requested port", () => {
+    const managed = buildManagedConfig(
+      {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+      },
+      {
+        ports: [5001, 5002, 5003],
+        containerName: "devbox-example-5001",
+        sshAuthSock: null,
+        knownHostsPath: null,
+      },
+    );
+
+    expect(managed.runArgs).toEqual([
+      "--name",
+      "devbox-example-5001",
+      "-p",
+      "5001:5001",
+      "-p",
+      "5002:5002",
+      "-p",
+      "5003:5003",
+    ]);
+  });
+
   test("stores a localEnv placeholder instead of a persisted github token value", () => {
     const managed = buildManagedConfig(
       {
@@ -885,6 +981,12 @@ describe("formatReadyMessage", () => {
   test("includes an explicit remote workspace folder from the devcontainer result", () => {
     expect(formatReadyMessage("abcdef1234567890", 6000, "/workspace/custom-root")).toBe(
       "\nReady. abcdef123456 is available on port 6000.\nProject root inside the container: /workspace/custom-root",
+    );
+  });
+
+  test("includes all published ports", () => {
+    expect(formatReadyMessage("abcdef1234567890", [6000, 6001], "/workspace/custom-root")).toBe(
+      "\nReady. abcdef123456 is available on ports 6000, 6001.\nProject root inside the container: /workspace/custom-root",
     );
   });
 });

@@ -45,6 +45,7 @@ interface ExecOptions {
   cwd?: string;
   env?: Record<string, string | undefined>;
   stdin?: string | Uint8Array;
+  inheritStdio?: boolean;
   stdoutMode?: "capture" | "raw" | "devcontainer-json";
   stderrMode?: "capture" | "raw" | "devcontainer-json";
   allowFailure?: boolean;
@@ -589,21 +590,50 @@ export async function assertPortAvailable(port: number, allowIfManagedContainerO
   throw new UserError(`Host port ${port} is already in use.`);
 }
 
+export async function assertPortsAvailable(
+  ports: number[],
+  managedContainerPorts: ReadonlySet<number> = new Set(),
+): Promise<void> {
+  for (const port of ports) {
+    await assertPortAvailable(port, managedContainerPorts.has(port));
+  }
+}
+
+export async function findAvailablePorts(
+  startPort: number,
+  count: number,
+  isPortAvailable: (port: number) => Promise<boolean> = defaultIsPortAvailable,
+): Promise<number[]> {
+  if (!Number.isInteger(startPort) || startPort < 1 || startPort > 65535) {
+    throw new UserError(`Port must be between 1 and 65535. Received: ${startPort}`);
+  }
+  if (!Number.isInteger(count) || count < 1 || count > 65535) {
+    throw new UserError(`Port count must be between 1 and 65535. Received: ${count}`);
+  }
+
+  const ports: number[] = [];
+  for (let port = startPort; port <= 65535 && ports.length < count; port += 1) {
+    if (await isPortAvailable(port)) {
+      ports.push(port);
+    }
+  }
+
+  if (ports.length === count) {
+    return ports;
+  }
+
+  if (count === 1) {
+    throw new UserError(`No available host port was found starting at ${startPort}.`);
+  }
+
+  throw new UserError(`No available host ports were found starting at ${startPort}; requested ${count}.`);
+}
+
 export async function findFirstAvailablePort(
   startPort: number,
   isPortAvailable: (port: number) => Promise<boolean> = defaultIsPortAvailable,
 ): Promise<number> {
-  if (!Number.isInteger(startPort) || startPort < 1 || startPort > 65535) {
-    throw new UserError(`Port must be between 1 and 65535. Received: ${startPort}`);
-  }
-
-  for (let port = startPort; port <= 65535; port += 1) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-
-  throw new UserError(`No available host port was found starting at ${startPort}.`);
+  return (await findAvailablePorts(startPort, 1, isPortAvailable))[0];
 }
 
 export async function removeContainers(containerIds: string[]): Promise<void> {
@@ -896,6 +926,22 @@ export async function openInteractiveShell(containerId: string): Promise<number>
       rows: process.stdout.isTTY ? process.stdout.rows : undefined,
     }),
   );
+}
+
+export function buildDevcontainerExecCommand(containerId: string, commandArgs: string[]): string[] {
+  if (commandArgs.length === 0) {
+    throw new UserError("A command is required.");
+  }
+
+  return ["devcontainer", "exec", "--container-id", containerId, ...commandArgs];
+}
+
+export async function runDevcontainerCommand(containerId: string, commandArgs: string[]): Promise<number> {
+  const result = await execute(buildDevcontainerExecCommand(containerId, commandArgs), {
+    inheritStdio: true,
+    allowFailure: true,
+  });
+  return result.exitCode;
 }
 
 async function hasDockerDesktopHostService(): Promise<boolean> {
@@ -1341,14 +1387,20 @@ async function execute(command: string[], options: ExecOptions): Promise<ExecRes
   const subprocess = spawn(command[0], command.slice(1), {
     cwd: options.cwd,
     env,
-    stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+    stdio: options.inheritStdio
+      ? "inherit"
+      : [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
   });
-  if (options.stdin !== undefined) {
+  if (!options.inheritStdio && options.stdin !== undefined) {
     subprocess.stdin?.end(options.stdin);
   }
 
-  const stdoutPromise = consumeStream(subprocess.stdout, options.stdoutMode ?? "capture", false);
-  const stderrPromise = consumeStream(subprocess.stderr, options.stderrMode ?? "capture", true);
+  const stdoutPromise = options.inheritStdio
+    ? Promise.resolve("")
+    : consumeStream(subprocess.stdout, options.stdoutMode ?? "capture", false);
+  const stderrPromise = options.inheritStdio
+    ? Promise.resolve("")
+    : consumeStream(subprocess.stderr, options.stderrMode ?? "capture", true);
   const exitPromise = new Promise<number>((resolve, reject) => {
     subprocess.once("error", reject);
     subprocess.once("close", (exitCode) => {

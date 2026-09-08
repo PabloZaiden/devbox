@@ -124,21 +124,28 @@ function getContainerName(runArgs, fallbackName) {
   return String(runArgs[index + 1] ?? fallbackName);
 }
 
-function getPublishedPort(runArgs) {
-  const index = runArgs.indexOf("-p");
-  if (index === -1) {
-    return undefined;
+function getPublishedPorts(runArgs) {
+  const ports = [];
+  for (let index = 0; index < runArgs.length; index += 1) {
+    if (runArgs[index] !== "-p") {
+      continue;
+    }
+
+    const mapping = String(runArgs[index + 1] ?? "");
+    const hostPort = Number(mapping.split(":")[0]);
+    if (Number.isInteger(hostPort)) {
+      ports.push(hostPort);
+    }
+    index += 1;
   }
 
-  const mapping = String(runArgs[index + 1] ?? "");
-  const hostPort = Number(mapping.split(":")[0]);
-  return Number.isInteger(hostPort) ? hostPort : undefined;
+  return ports;
 }
 
 function buildInspectPayload(container) {
   const ports = {};
-  if (container.port !== undefined) {
-    ports[String(container.port) + "/tcp"] = [{ HostIp: "0.0.0.0", HostPort: String(container.port) }];
+  for (const port of container.ports ?? []) {
+    ports[String(port) + "/tcp"] = [{ HostIp: "0.0.0.0", HostPort: String(port) }];
   }
 
   return {
@@ -275,7 +282,7 @@ function handleDevcontainer() {
     const runArgs = Array.isArray(config.runArgs) ? config.runArgs.map(String) : [];
     const containerId = "fake-container-" + state.nextId;
     const containerName = getContainerName(runArgs, "devbox-fake-" + state.nextId);
-    const port = getPublishedPort(runArgs);
+    const ports = getPublishedPorts(runArgs);
     const labels = parseLabels(args);
     const remoteWorkspaceFolder =
       typeof config.workspaceFolder === "string" && config.workspaceFolder.length > 0
@@ -287,7 +294,8 @@ function handleDevcontainer() {
       id: containerId,
       labels,
       name: containerName,
-      port,
+      port: ports[0],
+      ports,
       remoteWorkspaceFolder,
       running: true,
       workspacePath,
@@ -336,6 +344,16 @@ function handleDevcontainer() {
       return;
     }
 
+    const containerIdIndex = args.indexOf("--container-id");
+    const commandArgs = containerIdIndex === -1 ? [] : args.slice(containerIdIndex + 2);
+    if (commandArgs[0] === "false") {
+      process.exit(7);
+    }
+    if (commandArgs[0] === "printf") {
+      process.stdout.write(commandArgs.slice(1).join(" "));
+      return;
+    }
+    console.log(commandArgs.join(" "));
     return;
   }
 
@@ -421,6 +439,21 @@ describe("example workspaces (simulated host tools)", () => {
     expect(shell.exitCode).toBe(0);
     expect(shell.stdout).toContain("Opening shell inside ");
 
+    const exec = runCli(fixture, ["exec", "--", "printf", "automation-ok"]);
+    expect(exec.exitCode).toBe(0);
+    expect(exec.stdout).toBe("automation-ok");
+    const commandsAfterExec = await readCommandLog(fixture.commandLogPath);
+    expect(
+      commandsAfterExec.some(
+        (entry) =>
+          entry.tool === "devcontainer" &&
+          entry.args[0] === "exec" &&
+          entry.args.includes("--container-id") &&
+          entry.args.includes("fake-container-1") &&
+          entry.args.slice(entry.args.indexOf("--container-id") + 2).join("\u0000") === "printf\u0000automation-ok",
+      ),
+    ).toBe(true);
+
     const statusWhileRunning = runCli(fixture, ["status"]);
     expect(statusWhileRunning.exitCode).toBe(0);
     const runningStatus = JSON.parse(statusWhileRunning.stdout);
@@ -455,6 +488,79 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stoppedStatus.hasStateFile).toBe(true);
     expect(stoppedStatus.hasCredentialFile).toBe(true);
     expect(stoppedStatus.hasSshMetadataFile).toBe(true);
+  });
+
+  test("exec fails clearly when no managed container is running and propagates command failures", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+
+    const missing = runCli(fixture, ["exec", "--", "printf", "never-run"]);
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stderr).toContain("No running managed container was found for this workspace.");
+
+    const up = runCli(fixture, ["up", "--allow-missing-ssh"]);
+    expect(up.exitCode).toBe(0);
+
+    const failed = runCli(fixture, ["exec", "--", "false"]);
+    expect(failed.exitCode).toBe(7);
+  });
+
+  test("publishes multiple ports without the bundled SSH server and can re-enable it", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+
+    const withoutSsh = runCli(fixture, ["up", "6000", "--ports", "3", "--no-ssh", "--allow-missing-ssh"]);
+    expect(withoutSsh.exitCode).toBe(0);
+    expect(withoutSsh.stdout).toContain("Using ports 6000, 6001, 6002.");
+    expect(withoutSsh.stdout).toContain("Bundled SSH server installation skipped");
+    expect(withoutSsh.stdout).not.toContain("SSH server:");
+    expect(withoutSsh.stdout).toContain("Ready.");
+    expect(withoutSsh.stdout).toContain("ports 6000, 6001, 6002");
+
+    const generatedConfig = await readJson(fixture.generatedConfigPath);
+    expect(generatedConfig.runArgs).toEqual([
+      "--name",
+      "devbox-smoke-workspace-6000",
+      "-p",
+      "6000:6000",
+      "-p",
+      "6001:6001",
+      "-p",
+      "6002:6002",
+    ]);
+
+    const stateWithoutSsh = await readJson(fixture.statePath);
+    expect(stateWithoutSsh.port).toBe(6000);
+    expect(stateWithoutSsh.ports).toEqual([6000, 6001, 6002]);
+    expect(stateWithoutSsh.sshEnabled).toBe(false);
+
+    const commandsWithoutSsh = await readCommandLog(fixture.commandLogPath);
+    expect(
+      commandsWithoutSsh.some((entry) => typeof entry.script === "string" && entry.script.includes("SSH_PORT=")),
+    ).toBe(false);
+
+    const statusWithoutSsh = runCli(fixture, ["status"]);
+    expect(statusWithoutSsh.exitCode).toBe(0);
+    const status = JSON.parse(statusWithoutSsh.stdout);
+    expect(status.ports).toEqual([6000, 6001, 6002]);
+    expect(status.sshEnabled).toBe(false);
+    expect(status.password).toBeNull();
+    expect(status.sshPort).toBeNull();
+    expect(Object.keys(status.publishedPorts)).toEqual(["6000/tcp", "6001/tcp", "6002/tcp"]);
+
+    const withSsh = runCli(fixture, ["up", "--ssh", "--allow-missing-ssh"]);
+    expect(withSsh.exitCode).toBe(0);
+    expect(withSsh.stdout).toContain("SSH server:");
+    expect(withSsh.stdout).toContain("SSH port: 6000");
+
+    const stateWithSsh = await readJson(fixture.statePath);
+    expect(stateWithSsh.ports).toEqual([6000, 6001, 6002]);
+    expect(stateWithSsh.sshEnabled).toBe(true);
+
+    const rebuiltWithoutSsh = runCli(fixture, ["rebuild", "--no-ssh", "--allow-missing-ssh"]);
+    expect(rebuiltWithoutSsh.exitCode).toBe(0);
+    expect(rebuiltWithoutSsh.stdout).toContain("Bundled SSH server installation skipped");
+    const rebuiltState = await readJson(fixture.statePath);
+    expect(rebuiltState.ports).toEqual([6000, 6001, 6002]);
+    expect(rebuiltState.sshEnabled).toBe(false);
   });
 
   test("complex workspace preserves features and supports rebuild via the CLI", async () => {
