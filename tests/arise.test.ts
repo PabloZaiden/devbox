@@ -9,6 +9,7 @@ import {
   inspectWorkspaceRestartReadiness,
   recoverWorkspaceMount,
 } from "../src/arise";
+import { STATE_VERSION } from "../src/constants";
 import type { DockerInspect, WorkspaceState } from "../src/core";
 
 const tempPaths: string[] = [];
@@ -236,10 +237,11 @@ describe("ariseManagedWorkspaces", () => {
       [
         "/tmp/ok",
         {
-          version: 2,
+          version: STATE_VERSION,
           workspacePath: "/tmp/ok",
           workspaceHash: "hash-ok",
-          port: 5001,
+          ports: [5001],
+          sshEnabled: true,
           configSource: "repo",
           sourceConfigPath: "/tmp/ok/.devcontainer/services/api/devcontainer.json",
           generatedConfigPath: "/tmp/ok/.devcontainer/.devcontainer.json",

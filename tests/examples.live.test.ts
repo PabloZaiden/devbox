@@ -100,7 +100,7 @@ describe("example workspaces (real devcontainers)", () => {
       expect(up.stdout).toContain("Ready.");
 
       const state = await readJson(fixture.statePath);
-      const selectedPort = Number(state.port);
+      const selectedPort = Number(state.ports[0]);
       const containerId = String(state.lastContainerId);
       expect(up.stdout).toContain(`Using port ${selectedPort}.`);
       expect(state.ports).toEqual([selectedPort]);
@@ -145,7 +145,8 @@ describe("example workspaces (real devcontainers)", () => {
 
       const state = await readJson(fixture.statePath);
       const containerId = String(state.lastContainerId);
-      expect(state.port).toBe(fixture.port);
+      expect(state.ports).toEqual([fixture.port]);
+      expect(state.port).toBeUndefined();
 
       const inspect = inspectContainer(fixture, containerId);
       expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, fixture.port)}`);
@@ -303,7 +304,8 @@ describe("example workspaces (real devcontainers)", () => {
 
       const state = await readJson(fixture.statePath);
       const firstContainerId = String(state.lastContainerId);
-      expect(state.port).toBe(fixture.port);
+      expect(state.ports).toEqual([fixture.port]);
+      expect(state.port).toBeUndefined();
 
       const inspect = inspectContainer(fixture, firstContainerId);
       expect(inspect.Name).toBe(`/${getManagedContainerName(fixture.workspacePath, fixture.port)}`);
@@ -370,7 +372,8 @@ describe("example workspaces (real devcontainers)", () => {
 
       const rebuiltState = await readJson(fixture.statePath);
       const rebuiltContainerId = String(rebuiltState.lastContainerId);
-      expect(rebuiltState.port).toBe(fixture.port);
+      expect(rebuiltState.ports).toEqual([fixture.port]);
+      expect(rebuiltState.port).toBeUndefined();
       expect(rebuiltContainerId).not.toBe(firstContainerId);
       const restoredHostKey = execInContainerAsRoot(fixture, rebuiltContainerId, "find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key' | head -n 1");
       expect(restoredHostKey.stdout.trim().length).toBeGreaterThan(0);

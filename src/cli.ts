@@ -384,7 +384,6 @@ async function handleUpLike(
   await saveWorkspaceState(
     createWorkspaceState({
       workspacePath,
-      port: ports[0],
       ports,
       sshEnabled,
       configSource: resolvedConfig.configSource,

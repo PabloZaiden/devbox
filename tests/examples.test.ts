@@ -413,7 +413,8 @@ describe("example workspaces (simulated host tools)", () => {
     expect(generatedConfig.containerEnv).toEqual({});
 
     const state = await readJson(fixture.statePath);
-    expect(state.port).toBe(5001);
+    expect(state.ports).toEqual([5001]);
+    expect(state.port).toBeUndefined();
     expect(state.sourceConfigPath).toBe(fixture.sourceConfigPath);
     expect(state.configSource).toBe("repo");
     expect(state.generatedConfigPath).toBe(fixture.generatedConfigPath);
@@ -458,7 +459,8 @@ describe("example workspaces (simulated host tools)", () => {
     expect(statusWhileRunning.exitCode).toBe(0);
     const runningStatus = JSON.parse(statusWhileRunning.stdout);
     expect(runningStatus.running).toBe(true);
-    expect(runningStatus.port).toBe(5001);
+    expect(runningStatus.ports).toEqual([5001]);
+    expect(runningStatus.port).toBeUndefined();
     expect(runningStatus.password).toBe("password");
     expect(runningStatus.workdir).toBe("/workspaces/smoke-workspace");
     expect(runningStatus.containerCount).toBe(1);
@@ -483,7 +485,8 @@ describe("example workspaces (simulated host tools)", () => {
     expect(statusAfterDown.exitCode).toBe(0);
     const stoppedStatus = JSON.parse(statusAfterDown.stdout);
     expect(stoppedStatus.running).toBe(false);
-    expect(stoppedStatus.port).toBe(5001);
+    expect(stoppedStatus.ports).toEqual([5001]);
+    expect(stoppedStatus.port).toBeUndefined();
     expect(stoppedStatus.password).toBe("password");
     expect(stoppedStatus.hasStateFile).toBe(true);
     expect(stoppedStatus.hasCredentialFile).toBe(true);
@@ -528,8 +531,8 @@ describe("example workspaces (simulated host tools)", () => {
     ]);
 
     const stateWithoutSsh = await readJson(fixture.statePath);
-    expect(stateWithoutSsh.port).toBe(6000);
     expect(stateWithoutSsh.ports).toEqual([6000, 6001, 6002]);
+    expect(stateWithoutSsh.port).toBeUndefined();
     expect(stateWithoutSsh.sshEnabled).toBe(false);
 
     const commandsWithoutSsh = await readCommandLog(fixture.commandLogPath);
@@ -620,7 +623,8 @@ describe("example workspaces (simulated host tools)", () => {
     expect(rebuild.stdout).toContain("Ready.");
 
     const rebuiltState = await readJson(fixture.statePath);
-    expect(rebuiltState.port).toBe(5001);
+    expect(rebuiltState.ports).toEqual([5001]);
+    expect(rebuiltState.port).toBeUndefined();
     expect(rebuiltState.lastContainerId).not.toBe(initialState.lastContainerId);
 
     const down = runCli(fixture, ["down"]);
@@ -704,7 +708,8 @@ describe("example workspaces (simulated host tools)", () => {
     expect(existsSync(fixture.generatedConfigPath)).toBe(true);
 
     const state = await readJson(fixture.statePath);
-    expect(state.port).toBe(5010);
+    expect(state.ports).toEqual([5010]);
+    expect(state.port).toBeUndefined();
     expect(state.configSource).toBe("template");
     expect(state.sourceConfigPath).toBeNull();
     expect(state.template.name).toBe("ubuntu");

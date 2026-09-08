@@ -59,8 +59,7 @@ export interface DiscoveredConfig {
 }
 
 export interface ManagedConfigOptions {
-  ports?: number[];
-  port?: number;
+  ports: number[];
   containerName: string;
   sshAuthSock: string | null;
   knownHostsPath: string | null;
@@ -77,9 +76,8 @@ export interface WorkspaceState {
   version: number;
   workspacePath: string;
   workspaceHash: string;
-  port: number;
-  ports?: number[];
-  sshEnabled?: boolean;
+  ports: number[];
+  sshEnabled: boolean;
   configSource: "repo" | "template";
   sourceConfigPath: string | null;
   generatedConfigPath: string;
@@ -781,13 +779,15 @@ export async function loadWorkspaceState(workspacePath: string): Promise<Workspa
 
   const raw = await readFile(statePath, "utf8");
   const parsed = JSON.parse(raw) as unknown;
-  const migrated = migrateWorkspaceState(parsed);
+  const parsedState = parseWorkspaceState(parsed);
 
-  if (!migrated) {
-    throw new UserError(`State file is invalid: ${statePath}`);
+  if (!parsedState) {
+    throw new UserError(
+      `State file is invalid or unsupported; expected schema version ${STATE_VERSION} with a ports array and no port field: ${statePath}`,
+    );
   }
 
-  return migrated;
+  return parsedState;
 }
 
 export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
@@ -801,15 +801,7 @@ export async function deleteWorkspaceState(workspacePath: string): Promise<void>
 }
 
 export function getWorkspacePorts(state: WorkspaceState | null | undefined): number[] {
-  if (!state) {
-    return [];
-  }
-
-  if (Array.isArray(state.ports) && state.ports.length > 0) {
-    return [...state.ports];
-  }
-
-  return [state.port];
+  return state ? [...state.ports] : [];
 }
 
 export function getWorkspaceSshEnabled(state: WorkspaceState | null | undefined): boolean {
@@ -825,8 +817,8 @@ export function resolvePort(command: CommandName, explicitPort: number | undefin
     return explicitPort;
   }
 
-  if (state) {
-    return state.port;
+  if (state && state.ports.length > 0) {
+    return state.ports[0];
   }
 
   throw new UserError(
@@ -856,14 +848,6 @@ export function resolveUpPortsPreference(input: {
   }
 
   return undefined;
-}
-
-export function resolveUpPortPreference(input: {
-  explicitPort: number | undefined;
-  state: WorkspaceState | null;
-  existingPublishedPort?: number;
-}): number | undefined {
-  return resolveUpPortsPreference(input)?.[0];
 }
 
 export function describeUpPortStrategy(): string {
@@ -959,7 +943,7 @@ export async function removeGeneratedConfig(generatedConfigPath: string): Promis
 export function buildManagedConfig(baseConfig: DevcontainerConfig, options: ManagedConfigOptions): DevcontainerConfig {
   const managedConfig = structuredClone(baseConfig);
   const runArgs = withManagedContainerName(getStringArray(managedConfig.runArgs, "runArgs"), options.containerName);
-  const ports = normalizePortList(options.ports ?? (options.port !== undefined ? [options.port] : []));
+  const ports = normalizePortList(options.ports);
   for (const port of ports) {
     if (!hasPublishedPort(runArgs, port)) {
       runArgs.push("-p", `${port}:${port}`);
@@ -993,9 +977,8 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
 
 export function createWorkspaceState(input: {
   workspacePath: string;
-  port: number;
-  ports?: number[];
-  sshEnabled?: boolean;
+  ports: number[];
+  sshEnabled: boolean;
   configSource: "repo" | "template";
   sourceConfigPath: string | null;
   generatedConfigPath: string;
@@ -1005,15 +988,14 @@ export function createWorkspaceState(input: {
   githubAuth: GithubAuthPreference | null;
   containerId?: string;
 }): WorkspaceState {
-  const ports = normalizePortList(input.ports ?? [input.port]);
+  const ports = normalizePortList(input.ports);
 
   return {
     version: STATE_VERSION,
     workspacePath: input.workspacePath,
     workspaceHash: hashWorkspacePath(input.workspacePath),
-    port: ports[0],
     ports,
-    sshEnabled: input.sshEnabled ?? true,
+    sshEnabled: input.sshEnabled,
     configSource: input.configSource,
     sourceConfigPath: input.sourceConfigPath,
     generatedConfigPath: input.generatedConfigPath,
@@ -1402,16 +1384,19 @@ function assertValidTemplateState(value: unknown): asserts value is WorkspaceTem
   }
 }
 
-function migrateWorkspaceState(value: unknown): WorkspaceState | null {
+function parseWorkspaceState(value: unknown): WorkspaceState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
 
   const record = value as Record<string, unknown>;
   if (
+    record.version !== STATE_VERSION ||
     typeof record.workspacePath !== "string" ||
     typeof record.workspaceHash !== "string" ||
-    typeof record.port !== "number" ||
+    Object.prototype.hasOwnProperty.call(record, "port") ||
+    !parsePersistedPortList(record.ports) ||
+    typeof record.sshEnabled !== "boolean" ||
     typeof record.generatedConfigPath !== "string" ||
     typeof record.userDataDir !== "string" ||
     !record.labels ||
@@ -1421,42 +1406,12 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     return null;
   }
 
-  const ports = parsePersistedPortList(record.ports, record.port);
-  if (!ports) {
-    return null;
-  }
-
-  const sshEnabled = typeof record.sshEnabled === "boolean" ? record.sshEnabled : true;
+  const ports = record.ports as number[];
   const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString();
   const lastContainerId = typeof record.lastContainerId === "string" ? record.lastContainerId : undefined;
   const githubAuth = normalizeGithubAuthPreference(record.githubAuth);
 
-  if (record.version === 1) {
-    if (typeof record.sourceConfigPath !== "string") {
-      return null;
-    }
-
-    return {
-      version: STATE_VERSION,
-      workspacePath: record.workspacePath,
-      workspaceHash: record.workspaceHash,
-      port: record.port,
-      ports,
-      sshEnabled,
-      configSource: "repo",
-      sourceConfigPath: record.sourceConfigPath,
-      generatedConfigPath: record.generatedConfigPath,
-      labels: record.labels as Record<string, string>,
-      userDataDir: record.userDataDir,
-      template: null,
-      githubAuth: null,
-      lastContainerId,
-      updatedAt,
-    };
-  }
-
   if (
-    (record.version !== 2 && record.version !== STATE_VERSION) ||
     (record.configSource !== "repo" && record.configSource !== "template") ||
     (record.sourceConfigPath !== null && typeof record.sourceConfigPath !== "string")
   ) {
@@ -1471,9 +1426,8 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     version: STATE_VERSION,
     workspacePath: record.workspacePath,
     workspaceHash: record.workspaceHash,
-    port: record.port,
     ports,
-    sshEnabled,
+    sshEnabled: record.sshEnabled,
     configSource: record.configSource,
     sourceConfigPath: record.sourceConfigPath,
     generatedConfigPath:
@@ -1487,11 +1441,7 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
   };
 }
 
-function parsePersistedPortList(value: unknown, fallbackPort: number): number[] | null {
-  if (value === undefined) {
-    return Number.isInteger(fallbackPort) && fallbackPort >= 1 && fallbackPort <= 65535 ? [fallbackPort] : null;
-  }
-
+function parsePersistedPortList(value: unknown): number[] | null {
   if (
     !Array.isArray(value) ||
     value.length === 0 ||

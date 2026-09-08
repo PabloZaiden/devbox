@@ -27,7 +27,6 @@ export interface DevboxStatusPortBinding {
 
 export interface DevboxStatus {
   running: boolean;
-  port: number | null;
   ports: number[];
   sshEnabled: boolean;
   password: string | null;
@@ -139,7 +138,7 @@ export async function getDevboxStatus(
   const publishedPorts = getPublishedPorts(primaryContainer);
   const configuredWorkspacePorts = getWorkspacePorts(state);
   const configuredSshPort = sshEnabled
-    ? state?.port
+    ? configuredWorkspacePorts[0]
       ?? sshMetadataFile.value?.sshPort
       ?? credentialFile.value?.sshPort
       ?? getManagedPortFromContainerName(primaryContainer?.Name)
@@ -150,7 +149,6 @@ export async function getDevboxStatus(
     configuredSshPort,
     publishedPorts,
   });
-  const effectivePort = ports[0] ?? null;
   const sshUser = sshEnabled ? sshMetadataFile.value?.sshUser ?? credentialFile.value?.user ?? null : null;
   const permitRootLogin = sshEnabled
     ? sshMetadataFile.value?.permitRootLogin ?? credentialFile.value?.permitRootLogin ?? null
@@ -176,7 +174,6 @@ export async function getDevboxStatus(
 
   return {
     running: Boolean(primaryContainer?.State?.Running),
-    port: effectivePort,
     ports,
     sshEnabled,
     password,

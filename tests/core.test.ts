@@ -25,7 +25,6 @@ import {
   resolveWorkspaceConfig,
   resolvePort,
   resolveUpPortsPreference,
-  resolveUpPortPreference,
   validateSupportedDevcontainerConfig,
   getWorkspaceStateFile,
   type DevcontainerConfig,
@@ -326,10 +325,11 @@ describe("resolvePort", () => {
   test("reuses stored port", () => {
     expect(
       resolvePort("up", undefined, {
-        version: 2,
+        version: STATE_VERSION,
         workspacePath: "/tmp/ws",
         workspaceHash: "hash",
-        port: 5003,
+        ports: [5003],
+        sshEnabled: true,
         configSource: "repo",
         sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
         generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
@@ -344,7 +344,7 @@ describe("resolvePort", () => {
 });
 
 describe("loadWorkspaceState", () => {
-  test("loads a version 1 workspace state file from local workspace state", async () => {
+  test("rejects a legacy workspace state file", async () => {
     const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
     tempPaths.push(workspacePath);
 
@@ -368,23 +368,7 @@ describe("loadWorkspaceState", () => {
       "utf8",
     );
 
-    await expect(loadWorkspaceState(workspacePath)).resolves.toEqual({
-      version: STATE_VERSION,
-      workspacePath,
-      workspaceHash: "hash",
-      port: 5001,
-      ports: [5001],
-      sshEnabled: true,
-      configSource: "repo",
-      sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
-      generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
-      labels: { managed: "true" },
-      userDataDir: path.join(workspacePath, ".devbox", "user-data"),
-      template: null,
-      githubAuth: null,
-      lastContainerId: "container-123",
-      updatedAt: "2026-04-23T00:00:00.000Z",
-    });
+    await expect(loadWorkspaceState(workspacePath)).rejects.toThrow("State file is invalid");
   });
 
   test("loads a persisted GitHub auth preference", async () => {
@@ -399,7 +383,8 @@ describe("loadWorkspaceState", () => {
         version: STATE_VERSION,
         workspacePath,
         workspaceHash: "hash",
-        port: 5001,
+        ports: [5001],
+        sshEnabled: true,
         configSource: "repo",
         sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
         generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
@@ -429,7 +414,8 @@ describe("loadWorkspaceState", () => {
         version: STATE_VERSION,
         workspacePath,
         workspaceHash: "hash",
-        port: 5001,
+        ports: [5001],
+        sshEnabled: true,
         configSource: "repo",
         sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
         generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devbox.generated.devcontainer.json"),
@@ -448,12 +434,13 @@ describe("loadWorkspaceState", () => {
   });
 });
 
-describe("resolveUpPortPreference", () => {
+describe("resolveUpPortsPreference", () => {
   const state: WorkspaceState = {
-    version: 2,
+    version: STATE_VERSION,
     workspacePath: "/tmp/ws",
     workspaceHash: "hash",
-    port: 5003,
+    ports: [5003],
+    sshEnabled: true,
     configSource: "repo",
     sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
     generatedConfigPath: "/tmp/ws/.devcontainer/.devbox.generated.devcontainer.json",
@@ -464,20 +451,45 @@ describe("resolveUpPortPreference", () => {
     updatedAt: new Date().toISOString(),
   };
 
-  test("prefers an explicit port", () => {
-    expect(resolveUpPortPreference({ explicitPort: 5001, state, existingPublishedPort: 5002 })).toBe(5001);
+  test("prefers an explicit first port", () => {
+    expect(
+      resolveUpPortsPreference({
+        explicitPort: 5001,
+        portCount: 3,
+        state,
+        existingPublishedPort: 5002,
+      }),
+    ).toEqual([5001]);
   });
 
-  test("reuses the stored workspace port when no explicit port is provided", () => {
-    expect(resolveUpPortPreference({ explicitPort: undefined, state, existingPublishedPort: 5002 })).toBe(5003);
+  test("reuses the stored workspace ports when no explicit port is provided", () => {
+    expect(
+      resolveUpPortsPreference({
+        explicitPort: undefined,
+        state,
+        existingPublishedPort: 5002,
+      }),
+    ).toEqual([5003]);
   });
 
   test("falls back to an existing managed container port when state is missing", () => {
-    expect(resolveUpPortPreference({ explicitPort: undefined, state: null, existingPublishedPort: 5004 })).toBe(5004);
+    expect(
+      resolveUpPortsPreference({
+        explicitPort: undefined,
+        state: null,
+        existingPublishedPort: 5004,
+      }),
+    ).toEqual([5004]);
   });
 
   test("returns undefined when up should auto-assign a new port", () => {
-    expect(resolveUpPortPreference({ explicitPort: undefined, state: null, existingPublishedPort: undefined })).toBeUndefined();
+    expect(
+      resolveUpPortsPreference({
+        explicitPort: undefined,
+        state: null,
+        existingPublishedPort: undefined,
+      }),
+    ).toBeUndefined();
   });
 
   test("reuses all stored ports when the requested count matches", () => {
@@ -615,7 +627,8 @@ describe("resolveWorkspaceConfig", () => {
       version: STATE_VERSION,
       workspacePath: tempDir,
       workspaceHash: "workspace-hash",
-      port: 5001,
+      ports: [5001],
+      sshEnabled: true,
       configSource: "template",
       sourceConfigPath: null,
       generatedConfigPath: getTemplateGeneratedConfigPath(tempDir),
@@ -666,7 +679,8 @@ describe("resolveWorkspaceConfig", () => {
       version: STATE_VERSION,
       workspacePath: tempDir,
       workspaceHash: "workspace-hash",
-      port: 5001,
+      ports: [5001],
+      sshEnabled: true,
       configSource: "template",
       sourceConfigPath: null,
       generatedConfigPath: path.join(os.tmpdir(), "old-devbox-state", ".devcontainer.json"),
@@ -718,7 +732,7 @@ describe("buildManagedConfig", () => {
     };
 
     const managed = buildManagedConfig(baseConfig, {
-      port: 5001,
+      ports: [5001],
       containerName: "devbox-example-5001",
       sshAuthSock: "/tmp/agent.sock",
       knownHostsPath: "/tmp/known_hosts",
@@ -747,7 +761,7 @@ describe("buildManagedConfig", () => {
         },
       },
       {
-        port: 5001,
+        ports: [5001],
         containerName: "devbox-example-5001",
         sshAuthSock: null,
         knownHostsPath: null,
@@ -767,7 +781,7 @@ describe("buildManagedConfig", () => {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
       },
       {
-        port: 5001,
+        ports: [5001],
         containerName: "devbox-example-5001",
         sshAuthSock: DOCKER_DESKTOP_SSH_AUTH_SOCK_SOURCE,
         knownHostsPath: null,
@@ -790,7 +804,7 @@ describe("buildManagedConfig", () => {
         runArgs: ["--name", "custom-name", "-p", "5001:5001"],
       },
       {
-        port: 5001,
+        ports: [5001],
         containerName: "devbox-example-5001",
         sshAuthSock: "/tmp/agent.sock",
         knownHostsPath: null,
@@ -832,7 +846,7 @@ describe("buildManagedConfig", () => {
         image: "mcr.microsoft.com/devcontainers/base:ubuntu",
       },
       {
-        port: 5001,
+        ports: [5001],
         containerName: "devbox-example-5001",
         sshAuthSock: null,
         knownHostsPath: null,
@@ -852,7 +866,7 @@ describe("buildManagedConfig", () => {
         containerUser: "vscode",
       },
       {
-        port: 5001,
+        ports: [5001],
         containerName: "devbox-example-5001",
         sshAuthSock: null,
         knownHostsPath: null,

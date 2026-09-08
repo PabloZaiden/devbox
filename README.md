@@ -64,8 +64,8 @@ devbox up
 # Publish three ports, using the first one for bundled SSH
 devbox up --ports 3
 
-# Publish three ports without installing or starting bundled SSH
-devbox up --ports 3 --no-ssh
+# Publish two ports without installing or starting bundled SSH
+devbox up --ports 2 --no-ssh
 
 # Re-enable bundled SSH for a workspace previously started with --no-ssh
 devbox up --ssh
@@ -123,6 +123,18 @@ Use `--ports <count>` to request how many ports should be published. If the firs
 
 When you run `devbox rebuild`, omitting the port reuses the last stored port list for the current workspace.
 
+The workspace state file uses schema version `4` and stores the selected ports only as `ports`; it never contains a singular `port` field:
+
+```json
+{
+  "version": 4,
+  "ports": [5001, 5002],
+  "sshEnabled": false
+}
+```
+
+State files from older devbox versions are intentionally not migrated. Remove `.devbox/state.json` and run `devbox up` again with the desired port options when upgrading an existing workspace.
+
 If no repo devcontainer is found and no previous template source is stored, `devbox up` automatically starts from the built-in `ubuntu` template. `devbox rebuild <port>` does the same when there is enough information to create the devbox but no prior workspace state exists. Devbox prints a message when this automatic fallback is used.
 
 `devbox rebuild` reuses the previously selected source for the workspace. If the workspace was started from `--template` or the automatic Ubuntu fallback, rebuild uses that saved template again. `rebuild --template ...` is intentionally not supported.
@@ -154,7 +166,6 @@ Example:
 ```json
 {
   "running": true,
-  "port": 5001,
   "ports": [5001, 5002],
   "sshEnabled": true,
   "password": "password",
