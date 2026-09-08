@@ -177,19 +177,21 @@ async function handleUpLike(
     existingInspects = await inspectContainers(existingContainerIds);
   }
 
-  const preferredPorts =
-    command === "up"
-      ? resolveUpPortsPreference({
-          explicitPort,
-          portCount: explicitPortCount,
-          state,
-          existingPublishedPort: getManagedPortFromContainerName(existingInspects[0]?.Name),
-        })
-      : explicitPort !== undefined
-        ? [explicitPort]
-        : state
-          ? getWorkspacePorts(state)
-          : (resolvePort(command, explicitPort, state), undefined);
+  let preferredPorts: number[] | undefined;
+  if (command === "up") {
+    preferredPorts = resolveUpPortsPreference({
+      explicitPort,
+      portCount: explicitPortCount,
+      state,
+      existingPublishedPort: getManagedPortFromContainerName(existingInspects[0]?.Name),
+    });
+  } else if (explicitPort !== undefined) {
+    preferredPorts = [explicitPort];
+  } else if (state) {
+    preferredPorts = getWorkspacePorts(state);
+  } else {
+    preferredPorts = [resolvePort(command, explicitPort, state)];
+  }
   const requestedPortCount = explicitPortCount ?? preferredPorts?.length ?? 1;
   const ports = await resolveRequestedPorts({
     preferredPorts,

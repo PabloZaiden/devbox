@@ -485,6 +485,37 @@ describe("getDevboxStatus", () => {
     expect(status.publishedPorts["5001/tcp"]?.[0]?.hostPort).toBe(15001);
   });
 
+  test("sorts and deduplicates fallback published ports when state is unavailable", async () => {
+    const status = await getDevboxStatus(
+      { workspacePath: "/tmp/sorted-published-ports", state: null },
+      {
+        isDockerAvailable: () => true,
+        listManagedContainers: async () => ["container-1"],
+        inspectContainers: async () => [
+          {
+            Id: "container-1",
+            State: { Running: true, Status: "running" },
+            NetworkSettings: {
+              Ports: {
+                "8080/tcp": [{ HostIp: "0.0.0.0", HostPort: "18080" }],
+                "3000/tcp": [{ HostIp: "0.0.0.0", HostPort: "13000" }],
+                "4000/tcp": [{ HostIp: "0.0.0.0", HostPort: "13000" }],
+              },
+            },
+          },
+        ],
+        readFile: async () => {
+          const error = new Error("Missing file") as Error & { code?: string };
+          error.code = "ENOENT";
+          throw error;
+        },
+      },
+    );
+
+    expect(status.ports).toEqual([13000, 18080]);
+    expect(status.port).toBe(13000);
+  });
+
   test("falls back to state and credential data when docker is unavailable", async () => {
     const status = await getDevboxStatus(
       {

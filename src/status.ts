@@ -520,15 +520,15 @@ function getPublishedHostPortForPort(
 }
 
 function firstPublishedHostPorts(publishedPorts: Record<string, DevboxStatusPortBinding[]>): number[] {
-  const ports: number[] = [];
+  const ports = new Set<number>();
   for (const bindings of Object.values(publishedPorts)) {
     for (const binding of bindings) {
-      if (binding.hostPort !== null && !ports.includes(binding.hostPort)) {
-        ports.push(binding.hostPort);
+      if (binding.hostPort !== null) {
+        ports.add(binding.hostPort);
       }
     }
   }
-  return ports;
+  return [...ports].sort((left, right) => left - right);
 }
 
 function formatErrorMessage(error: unknown): string {
