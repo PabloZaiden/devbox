@@ -626,7 +626,12 @@ export async function findAvailablePorts(
     throw new UserError(`No available host port was found starting at ${startPort}.`);
   }
 
-  throw new UserError(`No available host ports were found starting at ${startPort}; requested ${count}.`);
+  if (ports.length === 0) {
+    throw new UserError(`No available host ports were found starting at ${startPort}; requested ${count}.`);
+  }
+
+  const portLabel = ports.length === 1 ? "port was" : "ports were";
+  throw new UserError(`Only ${ports.length} available host ${portLabel} found starting at ${startPort}; requested ${count}.`);
 }
 
 export async function findFirstAvailablePort(

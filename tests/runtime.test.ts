@@ -278,6 +278,12 @@ describe("findAvailablePorts", () => {
       "No available host ports were found starting at 65535; requested 2.",
     );
   });
+
+  test("reports partial allocation when the port range has insufficient capacity", async () => {
+    await expect(findAvailablePorts(65534, 2, async (port) => port === 65534)).rejects.toThrow(
+      "Only 1 available host port was found starting at 65534; requested 2.",
+    );
+  });
 });
 
 describe("probePortAvailability", () => {

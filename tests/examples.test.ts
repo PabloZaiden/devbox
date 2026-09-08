@@ -540,6 +540,14 @@ describe("example workspaces (simulated host tools)", () => {
       commandsWithoutSsh.some((entry) => typeof entry.script === "string" && entry.script.includes("SSH_PORT=")),
     ).toBe(false);
 
+    const increasedPortCount = runCli(fixture, ["up", "--ports", "4", "--no-ssh", "--allow-missing-ssh"]);
+    expect(increasedPortCount.exitCode).toBe(1);
+    expect(increasedPortCount.stderr).toContain("Use `devbox rebuild 6000 --ports 4` to change the port list.");
+
+    const reducedPortCount = runCli(fixture, ["up", "--ports", "1", "--no-ssh", "--allow-missing-ssh"]);
+    expect(reducedPortCount.exitCode).toBe(1);
+    expect(reducedPortCount.stderr).toContain("Use `devbox rebuild 6000` to change the port list.");
+
     const statusWithoutSsh = runCli(fixture, ["status"]);
     expect(statusWithoutSsh.exitCode).toBe(0);
     const status = JSON.parse(statusWithoutSsh.stdout);

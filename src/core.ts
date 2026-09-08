@@ -241,6 +241,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (separatorIndex === -1) {
       throw new UserError(`The exec command requires \`--\` before the command. Usage: \`${CLI_NAME} exec -- <command> [args...]\``);
     }
+    if (separatorIndex !== 0) {
+      throw new UserError(
+        `The exec command requires \`--\` as its first argument. Usage: \`${CLI_NAME} exec -- <command> [args...]\``,
+      );
+    }
 
     const execArgs = args.slice(separatorIndex + 1);
     if (execArgs.length === 0) {

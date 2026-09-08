@@ -270,10 +270,16 @@ async function handleUpLike(
     existingInspects = [];
   } else if (existingInspects[0]) {
     const publishedPorts = getPublishedHostPorts(existingInspects[0]);
-    const missingPorts = ports.filter((port) => !publishedPorts.includes(port));
-    if (publishedPorts.length > 0 && missingPorts.length > 0) {
+    const publishedPortSet = new Set(publishedPorts);
+    const requestedPortSet = new Set(ports);
+    const portListChanged =
+      publishedPorts.length !== ports.length ||
+      ports.some((port) => !publishedPortSet.has(port)) ||
+      publishedPorts.some((port) => !requestedPortSet.has(port));
+    if (publishedPorts.length > 0 && portListChanged) {
+      const rebuildCommand = `devbox rebuild ${ports[0]}${ports.length > 1 ? ` --ports ${ports.length}` : ""}`;
       throw new UserError(
-        `This workspace already has a managed container publishing port(s) ${publishedPorts.join(", ")}. Use \`devbox rebuild ${ports[0]}\` to change the port list.`,
+        `This workspace already has a managed container publishing port(s) ${publishedPorts.join(", ")}. Use \`${rebuildCommand}\` to change the port list.`,
       );
     }
   }

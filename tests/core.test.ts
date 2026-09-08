@@ -94,6 +94,9 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["exec", "printf", "hello"])).toThrow(
       "The exec command requires `--` before the command. Usage: `devbox exec -- <command> [args...]`",
     );
+    expect(() => parseArgs(["exec", "printf", "--", "hello"])).toThrow(
+      "The exec command requires `--` as its first argument. Usage: `devbox exec -- <command> [args...]`",
+    );
   });
 
   test("supports the status subcommand", () => {

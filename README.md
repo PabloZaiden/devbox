@@ -95,7 +95,7 @@ devbox update
 devbox templates
 
 # Rebuild/recreate the managed devcontainer
-devbox rebuild <port>
+devbox rebuild <port> [--ports <count>]
 
 # Open an interactive shell in the running managed devcontainer for this workspace
 devbox shell
@@ -123,6 +123,8 @@ Use `--ports <count>` to request how many ports should be published. If the firs
 
 When you run `devbox rebuild`, omitting the port reuses the last stored port list for the current workspace.
 
+When changing the number of ports for an already running workspace, pass the desired count to `rebuild`, for example `devbox rebuild 6000 --ports 2`.
+
 The workspace state file uses schema version `4` and stores the selected ports only as `ports`; it never contains a singular `port` field:
 
 ```json
@@ -143,7 +145,7 @@ GitHub CLI authentication for `GH_TOKEN` injection can be pinned per workspace w
 
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
 
-`devbox exec -- <command> [args...]` runs a non-interactive command in the already running managed container for the current workspace. Everything after the `--` separator is forwarded unchanged, and the command's standard input/output/error and exit code are preserved, which makes it suitable for scripts and automation. If no managed container is running, run `devbox up` first.
+`devbox exec -- <command> [args...]` runs a non-interactive command in the already running managed container for the current workspace. The `--` separator must be the first argument after `exec`; everything after it is forwarded unchanged. The command's standard input/output/error and exit code are preserved, which makes it suitable for scripts and automation. If no managed container is running, run `devbox up` first.
 
 `devbox status` always prints JSON so it can be used directly from scripts and automation.
 
