@@ -1,6 +1,6 @@
 # devbox
 
-`devbox` is a CLI that turns the devcontainer definition in the current directory into a repeatable "start my workspace and expose an SSH entrypoint" workflow.
+`devbox` is a CLI that turns the devcontainer definition in the current directory into a repeatable "start my workspace and expose one or more service ports" workflow, with an optional bundled SSH entrypoint.
 
 It does not modify the original `devcontainer.json`. Instead, it generates a derived config next to it, ignores that file locally when possible, and manages the resulting container with stable labels.
 
@@ -9,13 +9,13 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Discovers `.devcontainer/devcontainer.json` or `.devcontainer.json` in the current directory, can target `.devcontainer/<subpath>/devcontainer.json` with a flag, and falls back to the built-in `ubuntu` template when no repo devcontainer is present.
 - Reuses or creates the devcontainer with Docker + Dev Container CLI.
 - Names the managed container as `devbox-<project>-<port>`.
-- Publishes the same TCP port on host and container.
+- Publishes one or more TCP ports using the same host and container port numbers.
 - Mounts the current directory into the container as the workspace.
 - Shares a usable SSH agent socket with the container and copies a validated, non-empty `known_hosts` snapshot into the container.
-- Exposes the SSH service on the chosen host port and, when a host public key is available, installs it for key-based SSH login inside the devcontainer.
+- When enabled, exposes the bundled SSH service on the first published port and, when a host public key is available, installs it for key-based SSH login inside the devcontainer.
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
 - Injects `GH_TOKEN` from the GitHub CLI when available, optionally using a persisted per-workspace `gh` account.
-- Runs devbox's bundled SSH server setup script inside the devcontainer.
+- Runs devbox's bundled SSH server setup script inside the devcontainer unless SSH is disabled.
 - Stores devbox-owned state, SSH credentials, SSH metadata, and SSH host keys under the workspace-local `.devbox/` directory so they survive `down` / `rebuild`.
 
 ## Installation
@@ -54,12 +54,21 @@ Use `devbox update --check` to check for a newer release without installing it, 
 # Show CLI help
 devbox
 
-# Start or reuse the devcontainer on a chosen port
+# Start or reuse the devcontainer on a chosen port (bundled SSH is enabled by default)
 devbox up <port>
 
-# Start or reuse the devcontainer, reusing the stored workspace port when available
+# Start or reuse the devcontainer, reusing stored workspace ports when available
 # or auto-assigning the first free port from 5001 when none has been stored yet
 devbox up
+
+# Publish three ports, using the first one for bundled SSH
+devbox up --ports 3
+
+# Publish two ports without installing or starting bundled SSH
+devbox up --ports 2 --no-ssh
+
+# Re-enable bundled SSH for a workspace previously started with --no-ssh
+devbox up --ssh
 
 # Continue even if SSH agent sharing is unavailable
 devbox up <port> --allow-missing-ssh
@@ -86,10 +95,13 @@ devbox update
 devbox templates
 
 # Rebuild/recreate the managed devcontainer
-devbox rebuild <port>
+devbox rebuild <port> [--ports <count>]
 
 # Open an interactive shell in the running managed devcontainer for this workspace
 devbox shell
+
+# Run a non-interactive command in the running managed devcontainer
+devbox exec -- npm test
 
 # Print machine-readable JSON describing the managed devbox for this workspace
 devbox status
@@ -103,11 +115,27 @@ devbox down
 
 When you run `devbox up`, the port precedence is:
 
-1. the explicit port you passed,
-2. the last stored port for the current workspace, or
+1. the explicit port you passed as the first port,
+2. the last stored port list for the current workspace, or
 3. the first free port starting at `5001`.
 
-When you run `devbox rebuild`, omitting the port reuses the last stored port for the current workspace.
+Use `--ports <count>` to request how many ports should be published. If the first port is explicit, later ports are auto-assigned from the next port, skipping ports already in use. When SSH is enabled, only the first port is used by the bundled SSH server; the remaining ports are available for services in the devcontainer. `--no-ssh` disables only the bundled SSH server, while SSH agent sharing and the other Git/known-hosts integrations remain unchanged. `--ssh` re-enables the bundled server.
+
+When you run `devbox rebuild`, omitting the port reuses the last stored port list for the current workspace.
+
+When changing the number of ports for an already running workspace, pass the desired count to `rebuild`, for example `devbox rebuild 6000 --ports 2`.
+
+The workspace state file uses schema version `4` and stores the selected ports only as `ports`; it never contains a singular `port` field:
+
+```json
+{
+  "version": 4,
+  "ports": [5001, 5002],
+  "sshEnabled": false
+}
+```
+
+State files from older devbox versions are intentionally not migrated. Remove `.devbox/state.json` and run `devbox up` again with the desired port options when upgrading an existing workspace.
 
 If no repo devcontainer is found and no previous template source is stored, `devbox up` automatically starts from the built-in `ubuntu` template. `devbox rebuild <port>` does the same when there is enough information to create the devbox but no prior workspace state exists. Devbox prints a message when this automatic fallback is used.
 
@@ -116,6 +144,8 @@ If no repo devcontainer is found and no previous template source is stored, `dev
 GitHub CLI authentication for `GH_TOKEN` injection can be pinned per workspace with `--gh-user <login>` and optional `--gh-host <host>`. Devbox stores only the selected account metadata in `.devbox/state.json` as `githubAuth`; it does not store the token. Later `up`, `rebuild`, and `arise` runs reuse that account by calling `gh auth token --hostname <host> --user <login>`. The selection precedence is: explicit flags, `DEVBOX_GH_USER` / `DEVBOX_GH_HOST`, saved `.devbox/state.json`, then the currently active `gh` account.
 
 `devbox shell` requires an already running managed container for the current workspace. If none is running, use `devbox up` first.
+
+`devbox exec -- <command> [args...]` runs a non-interactive command in the already running managed container for the current workspace. The `--` separator must be the first argument after `exec`; everything after it is forwarded unchanged. The command's standard input/output/error and exit code are preserved, which makes it suitable for scripts and automation. If no managed container is running, run `devbox up` first.
 
 `devbox status` always prints JSON so it can be used directly from scripts and automation.
 
@@ -138,7 +168,8 @@ Example:
 ```json
 {
   "running": true,
-  "port": 5001,
+  "ports": [5001, 5002],
+  "sshEnabled": true,
   "password": "password",
   "workdir": "/workspaces/my-project",
   "workspacePath": "/host/path/to/my-project",
@@ -219,15 +250,18 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - `--template <name>` explicitly chooses a built-in template, even if the repo already has a devcontainer definition. If no repo devcontainer exists and no template was previously saved, omitting `--template` falls back to `ubuntu`.
 - `--gh-user <login>` and `--gh-host <host>` select the GitHub CLI account used for `GH_TOKEN` injection without changing the globally active `gh` account.
 - `devbox shell` opens an interactive shell inside the running managed container for the current workspace.
+- `devbox exec -- <command> [args...]` runs an automation command inside the running managed container and forwards its exit code.
 - `devbox status` reports live container state when available and falls back to saved workspace state in `.devbox/state.json` plus the persisted `.devbox/ssh/credentials` password file and `.devbox/ssh/metadata.json` metadata when the container is stopped or Docker is unavailable.
 - `devbox arise` only attempts workspaces it can recover from stopped managed containers and that still have at least one persisted devbox leftover, such as saved state, `.devbox/ssh/credentials`, `.devbox/ssh/metadata.json`, or `.devbox/ssh/host-keys/`.
 - For workspaces that pass the restart-readiness checks and are actually attempted, if there is more than one stopped managed container, `devbox arise` keeps the newest stopped container as the source of truth, removes the older stopped duplicates, and then reruns `devbox up`. Skipped or unrecoverable workspaces may retain older stopped duplicates.
-- `devbox up` prints the chosen port near the start of execution, before the longer devcontainer setup steps.
-- `down` removes managed containers but keeps `.devbox/`, so rebuilds can reuse the last selected port/config source/template and SSH artifacts.
-- Re-running `devbox up` after a host restart recreates the desired state: container up, port published, SSH runner started again.
+- `devbox up` prints all selected ports near the start of execution, before the longer devcontainer setup steps.
+- `down` removes managed containers but keeps `.devbox/`, so rebuilds can reuse the last selected ports/config source/template and SSH artifacts.
+- Re-running `devbox up` after a host restart recreates the desired state: container up, all configured ports published, and the SSH runner restarted when it is enabled.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
+- `--no-ssh` skips installation and startup of the bundled SSH server but still shares the SSH agent and configures the other host integrations.
+- `--ssh` explicitly enables the bundled SSH server for a workspace whose saved state has SSH disabled.
 - `devbox` stages a snapshot of the host `~/.ssh/known_hosts` before startup and skips injection with a warning when that file is missing, unreadable, empty, symlinked, or not a regular file.
 - `devbox` tries to install the host public key from `~/.ssh/id_rsa.pub` for SSH key-based login inside the container; if that default file is missing, it simply skips that step.
 - `--ssh-public-key /path/to/key.pub` overrides the default public key source. The override is validated and must point to a readable SSH public key file.

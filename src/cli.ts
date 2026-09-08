@@ -10,6 +10,8 @@ import {
   getManagedContainerName,
   getManagedPortFromContainerName,
   getManagedLabels,
+  getWorkspacePorts,
+  getWorkspaceSshEnabled,
   prepareKnownHostsMount,
   parseGithubHost,
   parseGithubUser,
@@ -23,7 +25,7 @@ import {
   resolveWorkspaceConfig,
   removeGeneratedConfig,
   resolvePort,
-  resolveUpPortPreference,
+  resolveUpPortsPreference,
   saveWorkspaceState,
   type DockerInspect,
   type GithubAuthPreference,
@@ -32,7 +34,7 @@ import {
 } from "./core";
 import {
   assertConfiguredSshAuthSockAvailable,
-  assertPortAvailable,
+  assertPortsAvailable,
   configureGitIdentity,
   configureAuthorizedKeys,
   copyKnownHosts,
@@ -42,7 +44,7 @@ import {
   ensureGeneratedConfigIgnored,
   ensureHostEnvironment,
   ensurePathIgnored,
-  findFirstAvailablePort,
+  findAvailablePorts,
   formatCommandError,
   isExecutableAvailable,
   inspectContainers,
@@ -56,6 +58,7 @@ import {
   requiresSshAuthSockPermissionFix,
   removeContainers,
   restoreRunnerHostKeys,
+  runDevcontainerCommand,
   startRunner,
   stopManagedSshd,
 } from "./runtime";
@@ -106,6 +109,11 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (parsed.command === "exec") {
+    await handleExec(workspacePath, state, parsed.execArgs ?? []);
+    return;
+  }
+
   if (parsed.command === "status") {
     await handleStatus(workspacePath, state);
     return;
@@ -121,6 +129,8 @@ async function main(): Promise<void> {
     workspacePath,
     state,
     parsed.port,
+    parsed.portCount,
+    parsed.sshEnabled,
     parsed.allowMissingSsh,
     parsed.devcontainerSubpath,
     parsed.sshPublicKeyPath,
@@ -135,6 +145,8 @@ async function handleUpLike(
   workspacePath: string,
   state: Awaited<ReturnType<typeof loadWorkspaceState>>,
   explicitPort: number | undefined,
+  explicitPortCount: number | undefined,
+  explicitSshEnabled: boolean | undefined,
   allowMissingSsh: boolean,
   devcontainerSubpath: string | undefined,
   sshPublicKeyPath?: string,
@@ -148,8 +160,11 @@ async function handleUpLike(
     state,
     env: process.env,
   });
+  const sshEnabled = explicitSshEnabled ?? getWorkspaceSshEnabled(state);
   const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath, githubAuth });
-  const resolvedSshPublicKey = await resolveSshPublicKey({ overridePath: sshPublicKeyPath });
+  const resolvedSshPublicKey = sshEnabled
+    ? await resolveSshPublicKey({ overridePath: sshPublicKeyPath })
+    : { publicKey: null, sourcePath: null, source: null };
   const workspaceHash = hashWorkspacePath(workspacePath);
   const labels = getManagedLabels(workspaceHash);
   const existingContainerIds = await listManagedContainers(labels);
@@ -162,16 +177,30 @@ async function handleUpLike(
     existingInspects = await inspectContainers(existingContainerIds);
   }
 
-  const port =
-    command === "up"
-      ? (resolveUpPortPreference({
-          explicitPort,
-          state,
-          existingPublishedPort: getManagedPortFromContainerName(existingInspects[0]?.Name),
-        }) ?? (await findFirstAvailablePort(DEFAULT_UP_AUTO_PORT_START)))
-      : resolvePort(command, explicitPort, state);
+  let preferredPorts: number[] | undefined;
+  if (command === "up") {
+    preferredPorts = resolveUpPortsPreference({
+      explicitPort,
+      portCount: explicitPortCount,
+      state,
+      existingPublishedPort: getManagedPortFromContainerName(existingInspects[0]?.Name),
+    });
+  } else if (explicitPort !== undefined) {
+    preferredPorts = [explicitPort];
+  } else if (state) {
+    preferredPorts = getWorkspacePorts(state);
+  } else {
+    preferredPorts = [resolvePort(command, explicitPort, state)];
+  }
+  const requestedPortCount = explicitPortCount ?? preferredPorts?.length ?? 1;
+  const ports = await resolveRequestedPorts({
+    preferredPorts,
+    requestedPortCount,
+  });
 
-  console.log(`Using port ${port}. ${command === "up" ? describeUpPortStrategy() : ""}`.trim());
+  console.log(
+    `Using ${ports.length === 1 ? "port" : "ports"} ${ports.join(", ")}. ${command === "up" ? describeUpPortStrategy() : ""}`.trim(),
+  );
   const resolvedConfig = await resolveWorkspaceConfig({
     workspacePath,
     devcontainerSubpath,
@@ -185,10 +214,10 @@ async function handleUpLike(
   const generatedConfigPath = resolvedConfig.generatedConfigPath;
   const userDataDir = getWorkspaceUserDataDir(workspacePath);
   const preparedKnownHosts = await prepareKnownHostsMount({ userDataDir });
-  const containerName = getManagedContainerName(workspacePath, port);
+  const containerName = getManagedContainerName(workspacePath, ports[0]);
 
   const managedConfig = buildManagedConfig(resolvedConfig.config, {
-    port,
+    ports,
     containerName,
     sshAuthSock: environment.sshAuthSock,
     knownHostsPath: preparedKnownHosts.knownHostsPath,
@@ -241,17 +270,26 @@ async function handleUpLike(
     existingInspects = [];
   } else if (existingInspects[0]) {
     const publishedPorts = getPublishedHostPorts(existingInspects[0]);
-    if (publishedPorts.length > 0 && !publishedPorts.includes(port)) {
+    const publishedPortSet = new Set(publishedPorts);
+    const requestedPortSet = new Set(ports);
+    const portListChanged =
+      publishedPorts.length !== ports.length ||
+      ports.some((port) => !publishedPortSet.has(port)) ||
+      publishedPorts.some((port) => !requestedPortSet.has(port));
+    if (publishedPorts.length > 0 && portListChanged) {
+      const rebuildCommand = `devbox rebuild ${ports[0]}${ports.length > 1 ? ` --ports ${ports.length}` : ""}`;
       throw new UserError(
-        `This workspace already has a managed container publishing port(s) ${publishedPorts.join(", ")}. Use \`devbox rebuild ${port}\` to change the port.`,
+        `This workspace already has a managed container publishing port(s) ${publishedPorts.join(", ")}. Use \`${rebuildCommand}\` to change the port list.`,
       );
     }
   }
 
-  const allowCurrentPort = existingInspects.some(
-    (container) => container.State?.Running && getPublishedHostPorts(container).includes(port),
+  const managedContainerPorts = new Set(
+    existingInspects.flatMap((container) =>
+      container.State?.Running ? getPublishedHostPorts(container) : [],
+    ),
   );
-  await assertPortAvailable(port, allowCurrentPort);
+  await assertPortsAvailable(ports, managedContainerPorts);
 
   const sshMountCompatibility = existingInspects[0]
     ? await ensureManagedContainerSshMountCompatibility(existingInspects[0], environment.sshAuthSock)
@@ -262,7 +300,7 @@ async function handleUpLike(
     console.log("Updated the stale host SSH agent mount symlink to point at the current SSH_AUTH_SOCK.");
   }
 
-  console.log(`Starting workspace on port ${port}...`);
+  console.log(`Starting workspace on ${ports.length === 1 ? "port" : "ports"} ${ports.join(", ")}...`);
   const upResult = await runStepWithHeartbeat({
     startMessage: "Preparing devcontainer. First builds with features may take several minutes...",
     heartbeatMessage: "Still preparing devcontainer",
@@ -278,8 +316,11 @@ async function handleUpLike(
   });
   const remoteWorkspaceFolder = upResult.remoteWorkspaceFolder ?? getDefaultRemoteWorkspaceFolder(workspacePath);
 
-  console.log("Configuring SSH access inside the devcontainer...");
-  const runnerMetadataPath = getWorkspaceSshMetadataFile(workspacePath);
+  console.log(
+    sshEnabled
+      ? "Configuring SSH access inside the devcontainer..."
+      : "Configuring devcontainer access without installing the bundled SSH server...",
+  );
   if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
     console.log("Making the forwarded SSH agent socket accessible to the container user...");
     await ensureSshAuthSockAccessible(upResult.containerId, environment.sshAuthSock);
@@ -295,45 +336,62 @@ async function handleUpLike(
     console.log("Syncing Git author identity from the host into the devcontainer...");
     await configureGitIdentity(upResult.containerId, environment.gitUserName, environment.gitUserEmail);
   }
-  await stopManagedSshd(upResult.containerId, port);
-  await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
-  const runnerCredentials = await runStepWithHeartbeat({
-    startMessage: "Installing and starting the SSH server inside the container (first run can take a bit)...",
-    heartbeatMessage: "Still installing and starting the SSH server",
-    successMessage: "SSH server is ready",
-    action: () => startRunner(upResult.containerId, port, remoteWorkspaceFolder),
-  });
-  if (resolvedSshPublicKey.publicKey) {
-    const sshUser = runnerCredentials.user ?? upResult.remoteUser;
-    if (!sshUser) {
-      throw new UserError(
-        "SSH public key auth was requested, but devbox could not determine which container user should receive authorized_keys.",
-      );
+  if (sshEnabled) {
+    await stopManagedSshd(upResult.containerId, ports[0]);
+    await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
+    const runnerCredentials = await runStepWithHeartbeat({
+      startMessage: "Installing and starting the SSH server inside the container (first run can take a bit)...",
+      heartbeatMessage: "Still installing and starting the SSH server",
+      successMessage: "SSH server is ready",
+      action: () => startRunner(upResult.containerId, ports[0], remoteWorkspaceFolder),
+    });
+    if (resolvedSshPublicKey.publicKey) {
+      const sshUser = runnerCredentials.user ?? upResult.remoteUser;
+      if (!sshUser) {
+        throw new UserError(
+          "SSH public key auth was requested, but devbox could not determine which container user should receive authorized_keys.",
+        );
+      }
+      console.log("Installing SSH public key for key-based login...");
+      await configureAuthorizedKeys(upResult.containerId, sshUser, resolvedSshPublicKey.publicKey);
     }
-    console.log("Installing SSH public key for key-based login...");
-    await configureAuthorizedKeys(upResult.containerId, sshUser, resolvedSshPublicKey.publicKey);
+    const runnerMetadataPath = getWorkspaceSshMetadataFile(workspacePath);
+    await mkdir(path.dirname(runnerMetadataPath), { recursive: true });
+    await writeFile(
+      runnerMetadataPath,
+      serializeRunnerMetadata(
+        createRunnerMetadata({
+          sshUser: runnerCredentials.user,
+          sshPort: runnerCredentials.sshPort ?? ports[0],
+          permitRootLogin: runnerCredentials.permitRootLogin,
+          publicKeyConfigured: resolvedSshPublicKey.publicKey !== null,
+          publicKeySource: resolvedSshPublicKey.sourcePath,
+        }),
+      ),
+      "utf8",
+    );
+    console.log("Saving SSH server state for future runs...");
+    await persistRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
+  } else {
+    if (existingInspects.length > 0) {
+      const previousPorts = new Set<number>([
+        ...getWorkspacePorts(state),
+        ...(getManagedPortFromContainerName(existingInspects[0]?.Name) !== undefined
+          ? [getManagedPortFromContainerName(existingInspects[0]?.Name)!]
+          : []),
+      ]);
+      for (const previousPort of previousPorts) {
+        await stopManagedSshd(upResult.containerId, previousPort);
+      }
+    }
+    console.log("Bundled SSH server installation skipped; published ports are ready for the devcontainer service.");
   }
-  await mkdir(path.dirname(runnerMetadataPath), { recursive: true });
-  await writeFile(
-    runnerMetadataPath,
-    serializeRunnerMetadata(
-      createRunnerMetadata({
-        sshUser: runnerCredentials.user,
-        sshPort: runnerCredentials.sshPort ?? port,
-        permitRootLogin: runnerCredentials.permitRootLogin,
-        publicKeyConfigured: resolvedSshPublicKey.publicKey !== null,
-        publicKeySource: resolvedSshPublicKey.sourcePath,
-      }),
-    ),
-    "utf8",
-  );
-  console.log("Saving SSH server state for future runs...");
-  await persistRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
 
   await saveWorkspaceState(
     createWorkspaceState({
       workspacePath,
-      port,
+      ports,
+      sshEnabled,
       configSource: resolvedConfig.configSource,
       sourceConfigPath: resolvedConfig.sourceConfigPath,
       generatedConfigPath,
@@ -345,7 +403,7 @@ async function handleUpLike(
     }),
   );
 
-  console.log(formatReadyMessage(upResult.containerId, port, remoteWorkspaceFolder));
+  console.log(formatReadyMessage(upResult.containerId, ports, remoteWorkspaceFolder));
   if (!preparedKnownHosts.knownHostsPath || knownHostsCopyResult !== "copied") {
     console.log("Host known_hosts was unavailable for injection, so only SSH agent sharing was configured.");
   }
@@ -374,6 +432,30 @@ async function handleShell(
   await assertConfiguredSshAuthSockAvailable(containerId);
   console.log(`Opening shell inside ${containerId.slice(0, 12)}...`);
   process.exitCode = await openInteractiveShell(containerId);
+}
+
+async function handleExec(
+  workspacePath: string,
+  state: Awaited<ReturnType<typeof loadWorkspaceState>>,
+  commandArgs: string[],
+): Promise<void> {
+  if (!isExecutableAvailable("docker")) {
+    throw new UserError("Docker is required but was not found in PATH.");
+  }
+
+  if (!isExecutableAvailable("devcontainer")) {
+    throw new UserError("Dev Container CLI is required but was not found in PATH.");
+  }
+
+  const labels = labelsForWorkspaceHash(hashWorkspacePath(workspacePath));
+  const containerIds = await listManagedContainers(labels);
+  const containers = await inspectContainers(containerIds);
+  const containerId = resolveShellContainerId({
+    containers,
+    preferredContainerId: state?.lastContainerId,
+  });
+
+  process.exitCode = await runDevcontainerCommand(containerId, commandArgs);
 }
 
 async function handleDown(
@@ -457,7 +539,16 @@ async function handleArise(): Promise<void> {
     loadWorkspaceState,
     removeContainers,
     restartWorkspace: async (input) => {
-      await handleUpLike("up", input.workspacePath, input.state, input.explicitPort, false, input.devcontainerSubpath);
+      await handleUpLike(
+        "up",
+        input.workspacePath,
+        input.state,
+        input.explicitPort,
+        undefined,
+        undefined,
+        false,
+        input.devcontainerSubpath,
+      );
     },
     log: (message) => console.log(message),
     formatError: formatAriseError,
@@ -513,6 +604,27 @@ function getPublishedHostPorts(container: DockerInspect): number[] {
   }
 
   return [...values];
+}
+
+async function resolveRequestedPorts(input: {
+  preferredPorts: number[] | undefined;
+  requestedPortCount: number;
+}): Promise<number[]> {
+  const preferredPorts = input.preferredPorts ?? [];
+  if (preferredPorts.length >= input.requestedPortCount) {
+    return preferredPorts.slice(0, input.requestedPortCount);
+  }
+
+  if (preferredPorts.length > 0) {
+    const lastPreferredPort = Math.max(...preferredPorts);
+    const additionalPorts = await findAvailablePorts(
+      lastPreferredPort + 1,
+      input.requestedPortCount - preferredPorts.length,
+    );
+    return [...preferredPorts, ...additionalPorts];
+  }
+
+  return findAvailablePorts(DEFAULT_UP_AUTO_PORT_START, input.requestedPortCount);
 }
 
 async function runStepWithHeartbeat<T>(input: {

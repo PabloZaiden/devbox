@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { STATE_VERSION } from "../src/constants";
 import type { DockerInspect, WorkspaceState } from "../src/core";
 import { createRunnerMetadata, parseRunnerCredentials, serializeRunnerMetadata } from "../src/runnerState";
 import { getDevboxStatus } from "../src/status";
@@ -43,10 +44,11 @@ describe("parseRunnerCredentials", () => {
 describe("getDevboxStatus", () => {
   test("prefers live container data and config hints when available", async () => {
     const state: WorkspaceState = {
-      version: 2,
+      version: STATE_VERSION,
       workspacePath: "/tmp/ws",
       workspaceHash: "workspace-hash",
-      port: 5001,
+      ports: [5001],
+      sshEnabled: true,
       configSource: "repo",
       sourceConfigPath: "/tmp/ws/.devcontainer/devcontainer.json",
       generatedConfigPath: "/tmp/ws/.devcontainer/.devcontainer.json",
@@ -110,7 +112,8 @@ describe("getDevboxStatus", () => {
     );
 
     expect(status.running).toBe(true);
-    expect(status.port).toBe(5001);
+    expect(status.ports).toEqual([5001]);
+    expect(status.sshEnabled).toBe(true);
     expect(status.password).toBe("secret");
     expect(status.sshUser).toBe("vscode");
     expect(status.sshPort).toBe(5001);
@@ -127,6 +130,74 @@ describe("getDevboxStatus", () => {
     expect(status.warnings).toEqual([
       "Found 2 managed containers for this workspace; reporting the preferred container.",
     ]);
+  });
+
+  test("reports all published ports without exposing SSH details when SSH is disabled", async () => {
+    const state: WorkspaceState = {
+      version: STATE_VERSION,
+      workspacePath: "/tmp/no-ssh",
+      workspaceHash: "workspace-hash",
+      ports: [5001, 5002],
+      sshEnabled: false,
+      configSource: "repo",
+      sourceConfigPath: "/tmp/no-ssh/.devcontainer/devcontainer.json",
+      generatedConfigPath: "/tmp/no-ssh/.devcontainer/.devcontainer.json",
+      labels: { "devbox.managed": "true", "devbox.workspace": "workspace-hash" },
+      userDataDir: "/tmp/state",
+      template: null,
+      githubAuth: null,
+      lastContainerId: "container-no-ssh",
+      updatedAt: "2026-03-16T00:00:00.000Z",
+    };
+
+    const status = await getDevboxStatus(
+      { workspacePath: state.workspacePath, state },
+      {
+        isDockerAvailable: () => true,
+        listManagedContainers: async () => ["container-no-ssh"],
+        inspectContainers: async () => [
+          {
+            Id: "container-no-ssh",
+            Name: "/devbox-no-ssh-5001",
+            State: { Running: true, Status: "running" },
+            NetworkSettings: {
+              Ports: {
+                "5001/tcp": [{ HostIp: "0.0.0.0", HostPort: "15001" }],
+                "5002/tcp": [{ HostIp: "0.0.0.0", HostPort: "15002" }],
+              },
+            },
+          },
+        ],
+        readFile: async (filePath) => {
+          if (filePath === state.sourceConfigPath) {
+            return '{ "remoteUser": "vscode" }';
+          }
+          if (filePath.endsWith("/.devbox/ssh/credentials")) {
+            return "stale-password\n";
+          }
+          if (filePath.endsWith("/.devbox/ssh/metadata.json")) {
+            return "stale metadata";
+          }
+          const error = new Error(`Missing file: ${filePath}`) as Error & { code?: string };
+          error.code = "ENOENT";
+          throw error;
+        },
+      },
+    );
+
+    expect(status.running).toBe(true);
+    expect(status.ports).toEqual([15001, 15002]);
+    expect(status.sshEnabled).toBe(false);
+    expect(status.password).toBeNull();
+    expect(status.sshUser).toBeNull();
+    expect(status.sshPort).toBeNull();
+    expect(status.permitRootLogin).toBeNull();
+    expect(status.publicKeyConfigured).toBeNull();
+    expect(status.publicKeySource).toBeNull();
+    expect(status.hasCredentialFile).toBe(true);
+    expect(status.hasSshMetadataFile).toBe(true);
+    expect(status.remoteUser).toBe("vscode");
+    expect(status.warnings).toEqual([]);
   });
 
   test("falls back to default workdir, password file, and metadata file without saved state", async () => {
@@ -161,7 +232,7 @@ describe("getDevboxStatus", () => {
     );
 
     expect(status.running).toBe(false);
-    expect(status.port).toBe(5010);
+    expect(status.ports).toEqual([5010]);
     expect(status.password).toBe("password");
     expect(status.sshUser).toBe("root");
     expect(status.sshPort).toBe(5010);
@@ -183,10 +254,11 @@ describe("getDevboxStatus", () => {
       {
         workspacePath: "/tmp/parse-fallback",
         state: {
-          version: 2,
+          version: STATE_VERSION,
           workspacePath: "/tmp/parse-fallback",
           workspaceHash: "workspace-hash",
-          port: 5001,
+          ports: [5001],
+          sshEnabled: true,
           configSource: "repo",
           sourceConfigPath: "/tmp/parse-fallback/custom/devcontainer.json",
           generatedConfigPath: "/tmp/parse-fallback/.devcontainer/.devcontainer.json",
@@ -226,10 +298,11 @@ describe("getDevboxStatus", () => {
       {
         workspacePath: "/tmp/object-fallback",
         state: {
-          version: 2,
+          version: STATE_VERSION,
           workspacePath: "/tmp/object-fallback",
           workspaceHash: "workspace-hash",
-          port: 5001,
+          ports: [5001],
+          sshEnabled: true,
           configSource: "repo",
           sourceConfigPath: "/tmp/object-fallback/custom/devcontainer.json",
           generatedConfigPath: "/tmp/object-fallback/.devcontainer/.devcontainer.json",
@@ -269,10 +342,11 @@ describe("getDevboxStatus", () => {
       {
         workspacePath: "/tmp/no-container",
         state: {
-          version: 2,
+          version: STATE_VERSION,
           workspacePath: "/tmp/no-container",
           workspaceHash: "workspace-hash",
-          port: 5001,
+          ports: [5001],
+          sshEnabled: true,
           configSource: "repo",
           sourceConfigPath: "/tmp/no-container/.devcontainer/devcontainer.json",
           generatedConfigPath: "/tmp/no-container/.devcontainer/.devcontainer.json",
@@ -306,10 +380,11 @@ describe("getDevboxStatus", () => {
       {
         workspacePath: "/tmp/password-only",
         state: {
-          version: 2,
+          version: STATE_VERSION,
           workspacePath: "/tmp/password-only",
           workspaceHash: "workspace-hash",
-          port: 5005,
+          ports: [5005],
+          sshEnabled: true,
           configSource: "repo",
           sourceConfigPath: "/tmp/password-only/.devcontainer/devcontainer.json",
           generatedConfigPath: "/tmp/password-only/.devcontainer/.devcontainer.json",
@@ -368,10 +443,11 @@ describe("getDevboxStatus", () => {
       {
         workspacePath: "/tmp/port-selection",
         state: {
-          version: 2,
+          version: STATE_VERSION,
           workspacePath: "/tmp/port-selection",
           workspaceHash: "workspace-hash",
-          port: 5001,
+          ports: [5001],
+          sshEnabled: true,
           configSource: "repo",
           sourceConfigPath: "/tmp/port-selection/.devcontainer/devcontainer.json",
           generatedConfigPath: "/tmp/port-selection/.devcontainer/.devcontainer.json",
@@ -407,10 +483,40 @@ describe("getDevboxStatus", () => {
       },
     );
 
-    expect(status.port).toBe(15001);
+    expect(status.ports).toEqual([15001]);
     expect(status.sshPort).toBe(5001);
     expect(status.publishedPorts["3000/tcp"]?.[0]?.hostPort).toBe(3000);
     expect(status.publishedPorts["5001/tcp"]?.[0]?.hostPort).toBe(15001);
+  });
+
+  test("sorts and deduplicates fallback published ports when state is unavailable", async () => {
+    const status = await getDevboxStatus(
+      { workspacePath: "/tmp/sorted-published-ports", state: null },
+      {
+        isDockerAvailable: () => true,
+        listManagedContainers: async () => ["container-1"],
+        inspectContainers: async () => [
+          {
+            Id: "container-1",
+            State: { Running: true, Status: "running" },
+            NetworkSettings: {
+              Ports: {
+                "8080/tcp": [{ HostIp: "0.0.0.0", HostPort: "18080" }],
+                "3000/tcp": [{ HostIp: "0.0.0.0", HostPort: "13000" }],
+                "4000/tcp": [{ HostIp: "0.0.0.0", HostPort: "13000" }],
+              },
+            },
+          },
+        ],
+        readFile: async () => {
+          const error = new Error("Missing file") as Error & { code?: string };
+          error.code = "ENOENT";
+          throw error;
+        },
+      },
+    );
+
+    expect(status.ports).toEqual([13000, 18080]);
   });
 
   test("falls back to state and credential data when docker is unavailable", async () => {
@@ -449,7 +555,7 @@ describe("getDevboxStatus", () => {
 
     expect(status.running).toBe(false);
     expect(status.containerCount).toBe(0);
-    expect(status.port).toBe(5010);
+    expect(status.ports).toEqual([5010]);
     expect(status.warnings).toContain(
       "Docker was not found in PATH; reporting saved workspace state and persisted SSH files only.",
     );

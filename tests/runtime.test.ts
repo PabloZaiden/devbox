@@ -10,10 +10,12 @@ import {
   buildCopyKnownHostsScript,
   buildConfigureGitIdentityScript,
   buildGhCliTokenArgs,
+  buildDevcontainerExecCommand,
   buildDevcontainerShellCommand,
   buildEnsureSshAuthSockAccessibleScript,
   ensurePathIgnored,
   buildInteractiveShellScript,
+  findAvailablePorts,
   findFirstAvailablePort,
   buildPersistRunnerHostKeysScript,
   buildRestoreRunnerHostKeysScript,
@@ -257,6 +259,33 @@ describe("findFirstAvailablePort", () => {
   });
 });
 
+describe("findAvailablePorts", () => {
+  test("returns multiple available ports while skipping unavailable ports", async () => {
+    const checkedPorts: number[] = [];
+
+    await expect(
+      findAvailablePorts(5001, 3, async (port) => {
+        checkedPorts.push(port);
+        return port !== 5001 && port !== 5003;
+      }),
+    ).resolves.toEqual([5002, 5004, 5005]);
+
+    expect(checkedPorts).toEqual([5001, 5002, 5003, 5004, 5005]);
+  });
+
+  test("reports the requested count when the port range is exhausted", async () => {
+    await expect(findAvailablePorts(65535, 2, async () => false)).rejects.toThrow(
+      "No available host ports were found starting at 65535; requested 2.",
+    );
+  });
+
+  test("reports partial allocation when the port range has insufficient capacity", async () => {
+    await expect(findAvailablePorts(65534, 2, async (port) => port === 65534)).rejects.toThrow(
+      "Only 1 available host port was found starting at 65534; requested 2.",
+    );
+  });
+});
+
 describe("probePortAvailability", () => {
   test("uses lsof PID results when available", async () => {
     await expect(
@@ -315,6 +344,20 @@ describe("interactive shell helpers", () => {
       "sh",
       "-lc",
       buildInteractiveShellScript(),
+    ]);
+  });
+
+  test("builds the non-interactive devcontainer exec command", () => {
+    expect(buildDevcontainerExecCommand("abc123", ["npm", "run", "test", "--", "--watch"])).toEqual([
+      "devcontainer",
+      "exec",
+      "--container-id",
+      "abc123",
+      "npm",
+      "run",
+      "test",
+      "--",
+      "--watch",
     ]);
   });
 

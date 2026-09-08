@@ -23,17 +23,30 @@ import {
 import { getTemplateDefinition } from "./templates";
 import { DEVBOX_VERSION } from "./version";
 
-export type CommandName = "up" | "down" | "rebuild" | "shell" | "status" | "arise" | "templates" | "update" | "help";
+export type CommandName =
+  | "up"
+  | "down"
+  | "rebuild"
+  | "shell"
+  | "exec"
+  | "status"
+  | "arise"
+  | "templates"
+  | "update"
+  | "help";
 
 export interface ParsedArgs {
   command: CommandName;
   port?: number;
+  portCount?: number;
   allowMissingSsh: boolean;
+  sshEnabled?: boolean;
   devcontainerSubpath?: string;
   sshPublicKeyPath?: string;
   templateName?: string;
   githubUser?: string;
   githubHost?: string;
+  execArgs?: string[];
   checkOnly?: boolean;
   version?: string;
 }
@@ -46,7 +59,7 @@ export interface DiscoveredConfig {
 }
 
 export interface ManagedConfigOptions {
-  port: number;
+  ports: number[];
   containerName: string;
   sshAuthSock: string | null;
   knownHostsPath: string | null;
@@ -63,7 +76,8 @@ export interface WorkspaceState {
   version: number;
   workspacePath: string;
   workspaceHash: string;
-  port: number;
+  ports: number[];
+  sshEnabled: boolean;
   configSource: "repo" | "template";
   sourceConfigPath: string | null;
   generatedConfigPath: string;
@@ -140,13 +154,14 @@ export class UserError extends Error {
 
 export function helpText(): string {
   return [
-    `${CLI_NAME} v${DEVBOX_VERSION} - manage a devcontainer plus a bundled SSH server`,
+    `${CLI_NAME} v${DEVBOX_VERSION} - manage a devcontainer with optional bundled SSH`,
     "",
     "Usage:",
     `  ${CLI_NAME}`,
-    `  ${CLI_NAME} up [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]`,
-    `  ${CLI_NAME} rebuild [port] [--allow-missing-ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]`,
+    `  ${CLI_NAME} up [port] [--ports <count>] [--allow-missing-ssh] [--no-ssh|--ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]`,
+    `  ${CLI_NAME} rebuild [port] [--ports <count>] [--allow-missing-ssh] [--no-ssh|--ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]`,
     `  ${CLI_NAME} shell`,
+    `  ${CLI_NAME} exec -- <command> [args...]`,
     `  ${CLI_NAME} status`,
     `  ${CLI_NAME} templates`,
     `  ${CLI_NAME} arise`,
@@ -159,6 +174,7 @@ export function helpText(): string {
     "  up         Start or reuse the managed devcontainer; falls back to the ubuntu template when none is found.",
     "  rebuild    Recreate the managed devcontainer; falls back to the ubuntu template when no repo devcontainer or prior state exists.",
     "  shell      Open an interactive shell in the running managed container.",
+    "  exec       Run a non-interactive command in the running managed container.",
     "  status     Print JSON describing the managed devbox for this workspace.",
     "  templates  Print JSON describing the built-in templates.",
     "  arise      Restart stopped managed workspaces discovered from existing containers.",
@@ -168,7 +184,10 @@ export function helpText(): string {
     "",
     "Options:",
     "  -p, --port <port>               Publish the same port on host and container.",
+    "  --ports <count>                 Publish this many ports, auto-selecting later ports when needed.",
     "  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.",
+    "  --no-ssh                        Do not install or start devbox's bundled SSH server.",
+    "  --ssh                           Install and start devbox's bundled SSH server.",
     "  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.",
     "  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.",
     "  --template <name>               Use a built-in template instead of a repo devcontainer.",
@@ -193,6 +212,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     first === "down" ||
     first === "rebuild" ||
     first === "shell" ||
+    first === "exec" ||
     first === "status" ||
     first === "arise" ||
     first === "templates" ||
@@ -208,8 +228,41 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError(`A command is required. Run \`${CLI_NAME} --help\` for usage.`);
   }
 
+  if (command === "exec") {
+    if (args[0] === "--help" || args[0] === "-h") {
+      return { command: "help", allowMissingSsh: false };
+    }
+
+    if (args.length === 0) {
+      throw new UserError(`The exec command requires a command. Usage: \`${CLI_NAME} exec -- <command> [args...]\``);
+    }
+
+    const separatorIndex = args.indexOf("--");
+    if (separatorIndex === -1) {
+      throw new UserError(`The exec command requires \`--\` before the command. Usage: \`${CLI_NAME} exec -- <command> [args...]\``);
+    }
+    if (separatorIndex !== 0) {
+      throw new UserError(
+        `The exec command requires \`--\` as its first argument. Usage: \`${CLI_NAME} exec -- <command> [args...]\``,
+      );
+    }
+
+    const execArgs = args.slice(separatorIndex + 1);
+    if (execArgs.length === 0) {
+      throw new UserError(`The exec command requires a command. Usage: \`${CLI_NAME} exec -- <command> [args...]\``);
+    }
+
+    return {
+      command,
+      allowMissingSsh: false,
+      execArgs,
+    };
+  }
+
   let port: number | undefined;
+  let portCount: number | undefined;
   let allowMissingSsh = false;
+  let sshEnabled: boolean | undefined;
   let devcontainerSubpath: string | undefined;
   let sshPublicKeyPath: string | undefined;
   let templateName: string | undefined;
@@ -228,6 +281,30 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (arg === "--allow-missing-ssh") {
       allowMissingSsh = true;
+      continue;
+    }
+
+    if (arg === "--no-ssh" || arg === "--ssh") {
+      const nextSshEnabled = arg === "--ssh";
+      if (sshEnabled !== undefined && sshEnabled !== nextSshEnabled) {
+        throw new UserError("Cannot combine --ssh with --no-ssh.");
+      }
+      sshEnabled = nextSshEnabled;
+      continue;
+    }
+
+    if (arg === "--ports") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --ports.");
+      }
+      portCount = parsePortCount(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--ports=")) {
+      portCount = parsePortCount(arg.slice("--ports=".length));
       continue;
     }
 
@@ -404,6 +481,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError("The update command does not accept a port.");
   }
 
+  if (command !== "up" && command !== "rebuild" && portCount !== undefined) {
+    throw new UserError(`The ${command} command does not accept --ports.`);
+  }
+
+  if (command !== "up" && command !== "rebuild" && sshEnabled !== undefined) {
+    throw new UserError(`The ${command} command does not accept ${sshEnabled ? "--ssh" : "--no-ssh"}.`);
+  }
+
   if (command === "shell" && devcontainerSubpath !== undefined) {
     throw new UserError("The shell command does not accept --devcontainer-subpath.");
   }
@@ -512,6 +597,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError(`The ${command} command does not accept --version.`);
   }
 
+  if (sshEnabled === false && sshPublicKeyPath !== undefined) {
+    throw new UserError("--ssh-public-key cannot be combined with --no-ssh.");
+  }
+
   if (command === "update" && checkOnly && version !== undefined) {
     throw new UserError("Cannot combine --check with --version.");
   }
@@ -519,7 +608,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return {
     command,
     port,
+    ...(portCount !== undefined ? { portCount } : {}),
     allowMissingSsh,
+    ...(sshEnabled !== undefined ? { sshEnabled } : {}),
     ...(devcontainerSubpath ? { devcontainerSubpath } : {}),
     ...(sshPublicKeyPath ? { sshPublicKeyPath } : {}),
     ...(templateName ? { templateName } : {}),
@@ -541,6 +632,19 @@ export function parsePort(raw: string): number {
   }
 
   return port;
+}
+
+export function parsePortCount(raw: string): number {
+  if (!/^\d+$/.test(raw)) {
+    throw new UserError(`Invalid port count: ${raw}`);
+  }
+
+  const count = Number(raw);
+  if (!Number.isInteger(count) || count < 1 || count > 65535) {
+    throw new UserError(`Port count must be between 1 and 65535. Received: ${raw}`);
+  }
+
+  return count;
 }
 
 export function parseGithubUser(raw: string): string {
@@ -626,8 +730,14 @@ export function getDefaultRemoteWorkspaceFolder(workspacePath: string): string {
   return path.posix.join("/workspaces", path.basename(workspacePath));
 }
 
-export function formatReadyMessage(containerId: string, port: number, remoteWorkspaceFolder: string): string {
-  return `\nReady. ${containerId.slice(0, 12)} is available on port ${port}.\nProject root inside the container: ${remoteWorkspaceFolder}`;
+export function formatReadyMessage(
+  containerId: string,
+  ports: number | number[],
+  remoteWorkspaceFolder: string,
+): string {
+  const normalizedPorts = typeof ports === "number" ? [ports] : ports;
+  const portLabel = normalizedPorts.length === 1 ? "port" : "ports";
+  return `\nReady. ${containerId.slice(0, 12)} is available on ${portLabel} ${normalizedPorts.join(", ")}.\nProject root inside the container: ${remoteWorkspaceFolder}`;
 }
 
 export function getManagedContainerName(workspacePath: string, port: number): string {
@@ -674,13 +784,15 @@ export async function loadWorkspaceState(workspacePath: string): Promise<Workspa
 
   const raw = await readFile(statePath, "utf8");
   const parsed = JSON.parse(raw) as unknown;
-  const migrated = migrateWorkspaceState(parsed);
+  const parsedState = parseWorkspaceState(parsed);
 
-  if (!migrated) {
-    throw new UserError(`State file is invalid: ${statePath}`);
+  if (!parsedState) {
+    throw new UserError(
+      `State file is invalid or unsupported; expected schema version ${STATE_VERSION} with a ports array and no port field: ${statePath}`,
+    );
   }
 
-  return migrated;
+  return parsedState;
 }
 
 export async function saveWorkspaceState(state: WorkspaceState): Promise<void> {
@@ -693,6 +805,14 @@ export async function deleteWorkspaceState(workspacePath: string): Promise<void>
   await rm(getWorkspaceStateDir(workspacePath), { recursive: true, force: true });
 }
 
+export function getWorkspacePorts(state: WorkspaceState | null | undefined): number[] {
+  return state ? [...state.ports] : [];
+}
+
+export function getWorkspaceSshEnabled(state: WorkspaceState | null | undefined): boolean {
+  return state?.sshEnabled ?? true;
+}
+
 export function resolvePort(command: CommandName, explicitPort: number | undefined, state: WorkspaceState | null): number {
   if (command === "down" || command === "shell" || command === "arise" || command === "help") {
     throw new UserError(`resolvePort cannot be used for ${command}.`);
@@ -702,8 +822,8 @@ export function resolvePort(command: CommandName, explicitPort: number | undefin
     return explicitPort;
   }
 
-  if (state) {
-    return state.port;
+  if (state && state.ports.length > 0) {
+    return state.ports[0];
   }
 
   throw new UserError(
@@ -711,24 +831,32 @@ export function resolvePort(command: CommandName, explicitPort: number | undefin
   );
 }
 
-export function resolveUpPortPreference(input: {
+export function resolveUpPortsPreference(input: {
   explicitPort: number | undefined;
+  portCount?: number;
   state: WorkspaceState | null;
   existingPublishedPort?: number;
-}): number | undefined {
+}): number[] | undefined {
+  const storedPorts = getWorkspacePorts(input.state);
+  const requestedCount = input.portCount ?? (storedPorts.length > 0 ? storedPorts.length : 1);
+
   if (input.explicitPort !== undefined) {
-    return input.explicitPort;
+    return [input.explicitPort];
   }
 
-  if (input.state) {
-    return input.state.port;
+  if (storedPorts.length > 0) {
+    return storedPorts.slice(0, requestedCount);
   }
 
-  return input.existingPublishedPort;
+  if (input.existingPublishedPort !== undefined) {
+    return [input.existingPublishedPort];
+  }
+
+  return undefined;
 }
 
 export function describeUpPortStrategy(): string {
-  return `Reuse the previous workspace port when available, otherwise auto-assign the first free port starting at ${DEFAULT_UP_AUTO_PORT_START}.`;
+  return `Reuse the previous workspace ports when available, otherwise auto-assign the first free port(s) starting at ${DEFAULT_UP_AUTO_PORT_START}.`;
 }
 
 export async function discoverDevcontainerConfig(
@@ -820,8 +948,11 @@ export async function removeGeneratedConfig(generatedConfigPath: string): Promis
 export function buildManagedConfig(baseConfig: DevcontainerConfig, options: ManagedConfigOptions): DevcontainerConfig {
   const managedConfig = structuredClone(baseConfig);
   const runArgs = withManagedContainerName(getStringArray(managedConfig.runArgs, "runArgs"), options.containerName);
-  if (!hasPublishedPort(runArgs, options.port)) {
-    runArgs.push("-p", `${options.port}:${options.port}`);
+  const ports = normalizePortList(options.ports);
+  for (const port of ports) {
+    if (!hasPublishedPort(runArgs, port)) {
+      runArgs.push("-p", `${port}:${port}`);
+    }
   }
   managedConfig.runArgs = runArgs;
 
@@ -851,7 +982,8 @@ export function buildManagedConfig(baseConfig: DevcontainerConfig, options: Mana
 
 export function createWorkspaceState(input: {
   workspacePath: string;
-  port: number;
+  ports: number[];
+  sshEnabled: boolean;
   configSource: "repo" | "template";
   sourceConfigPath: string | null;
   generatedConfigPath: string;
@@ -861,11 +993,14 @@ export function createWorkspaceState(input: {
   githubAuth: GithubAuthPreference | null;
   containerId?: string;
 }): WorkspaceState {
+  const ports = normalizePortList(input.ports);
+
   return {
     version: STATE_VERSION,
     workspacePath: input.workspacePath,
     workspaceHash: hashWorkspacePath(input.workspacePath),
-    port: input.port,
+    ports,
+    sshEnabled: input.sshEnabled,
     configSource: input.configSource,
     sourceConfigPath: input.sourceConfigPath,
     generatedConfigPath: input.generatedConfigPath,
@@ -1112,6 +1247,15 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)];
 }
 
+function normalizePortList(ports: number[]): number[] {
+  const normalized = [...new Set(ports)];
+  if (normalized.length === 0 || normalized.some((port) => !Number.isInteger(port) || port < 1 || port > 65535)) {
+    throw new UserError("At least one valid port is required.");
+  }
+
+  return normalized;
+}
+
 function withManagedContainerName(runArgs: string[], containerName: string): string[] {
   const next: string[] = [];
 
@@ -1245,16 +1389,19 @@ function assertValidTemplateState(value: unknown): asserts value is WorkspaceTem
   }
 }
 
-function migrateWorkspaceState(value: unknown): WorkspaceState | null {
+function parseWorkspaceState(value: unknown): WorkspaceState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
 
   const record = value as Record<string, unknown>;
   if (
+    record.version !== STATE_VERSION ||
     typeof record.workspacePath !== "string" ||
     typeof record.workspaceHash !== "string" ||
-    typeof record.port !== "number" ||
+    Object.prototype.hasOwnProperty.call(record, "port") ||
+    !parsePersistedPortList(record.ports) ||
+    typeof record.sshEnabled !== "boolean" ||
     typeof record.generatedConfigPath !== "string" ||
     typeof record.userDataDir !== "string" ||
     !record.labels ||
@@ -1264,34 +1411,12 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     return null;
   }
 
+  const ports = record.ports as number[];
   const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString();
   const lastContainerId = typeof record.lastContainerId === "string" ? record.lastContainerId : undefined;
   const githubAuth = normalizeGithubAuthPreference(record.githubAuth);
 
-  if (record.version === 1) {
-    if (typeof record.sourceConfigPath !== "string") {
-      return null;
-    }
-
-    return {
-      version: STATE_VERSION,
-      workspacePath: record.workspacePath,
-      workspaceHash: record.workspaceHash,
-      port: record.port,
-      configSource: "repo",
-      sourceConfigPath: record.sourceConfigPath,
-      generatedConfigPath: record.generatedConfigPath,
-      labels: record.labels as Record<string, string>,
-      userDataDir: record.userDataDir,
-      template: null,
-      githubAuth: null,
-      lastContainerId,
-      updatedAt,
-    };
-  }
-
   if (
-    record.version !== STATE_VERSION ||
     (record.configSource !== "repo" && record.configSource !== "template") ||
     (record.sourceConfigPath !== null && typeof record.sourceConfigPath !== "string")
   ) {
@@ -1306,7 +1431,8 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     version: STATE_VERSION,
     workspacePath: record.workspacePath,
     workspaceHash: record.workspaceHash,
-    port: record.port,
+    ports,
+    sshEnabled: record.sshEnabled,
     configSource: record.configSource,
     sourceConfigPath: record.sourceConfigPath,
     generatedConfigPath:
@@ -1318,6 +1444,19 @@ function migrateWorkspaceState(value: unknown): WorkspaceState | null {
     lastContainerId,
     updatedAt,
   };
+}
+
+function parsePersistedPortList(value: unknown): number[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((port) => typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535)
+  ) {
+    return null;
+  }
+
+  const ports = [...new Set(value as number[])];
+  return ports.length === value.length ? ports : null;
 }
 
 function normalizeGithubAuthPreference(value: unknown): GithubAuthPreference | null {
