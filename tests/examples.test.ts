@@ -344,6 +344,10 @@ function handleDevcontainer() {
       return;
     }
 
+    if (script.trim() === "false") {
+      process.exit(7);
+    }
+
     const containerIdIndex = args.indexOf("--container-id");
     const commandArgs = containerIdIndex === -1 ? [] : args.slice(containerIdIndex + 2);
     if (commandArgs[0] === "false") {
@@ -618,6 +622,25 @@ describe("example workspaces (simulated host tools)", () => {
     const stateAfterClear = await readJson(fixture.statePath);
     expect(stateAfterClear.startupCommand).toBeUndefined();
     expect(await countStartupCommands()).toBe(3);
+  });
+
+  test("persists the startup command when its first execution fails", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+
+    const failedUp = runCli(fixture, [
+      "up",
+      "--no-ssh",
+      "--startup-command",
+      "false",
+      "--allow-missing-ssh",
+    ]);
+    expect(failedUp.exitCode).toBe(7);
+
+    const stateAfterFailure = await readJson(fixture.statePath);
+    expect(stateAfterFailure.startupCommand).toBe("false");
+
+    const retry = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(retry.exitCode).toBe(7);
   });
 
   test("complex workspace preserves features and supports rebuild via the CLI", async () => {

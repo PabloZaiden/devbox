@@ -395,6 +395,22 @@ async function handleUpLike(
     console.log("Bundled SSH server installation skipped; published ports are ready for the devcontainer service.");
   }
 
+  const workspaceState = createWorkspaceState({
+    workspacePath,
+    ports,
+    sshEnabled,
+    startupCommand,
+    configSource: resolvedConfig.configSource,
+    sourceConfigPath: resolvedConfig.sourceConfigPath,
+    generatedConfigPath,
+    userDataDir,
+    labels,
+    template: resolvedConfig.template,
+    githubAuth: environment.githubAuth,
+    containerId: upResult.containerId,
+  });
+  await saveWorkspaceState(workspaceState);
+
   if (startupCommand) {
     await runStepWithHeartbeat({
       startMessage: "Running the configured post-start command...",
@@ -403,23 +419,6 @@ async function handleUpLike(
       action: () => runStartupCommand(upResult.containerId, startupCommand),
     });
   }
-
-  await saveWorkspaceState(
-    createWorkspaceState({
-      workspacePath,
-      ports,
-      sshEnabled,
-      startupCommand,
-      configSource: resolvedConfig.configSource,
-      sourceConfigPath: resolvedConfig.sourceConfigPath,
-      generatedConfigPath,
-      userDataDir,
-      labels,
-      template: resolvedConfig.template,
-      githubAuth: environment.githubAuth,
-      containerId: upResult.containerId,
-    }),
-  );
 
   console.log(formatReadyMessage(upResult.containerId, ports, remoteWorkspaceFolder));
   if (!preparedKnownHosts.knownHostsPath || knownHostsCopyResult !== "copied") {
