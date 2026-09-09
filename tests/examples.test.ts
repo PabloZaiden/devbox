@@ -344,6 +344,10 @@ function handleDevcontainer() {
       return;
     }
 
+    if (script.trim() === "false") {
+      process.exit(7);
+    }
+
     const containerIdIndex = args.indexOf("--container-id");
     const commandArgs = containerIdIndex === -1 ? [] : args.slice(containerIdIndex + 2);
     if (commandArgs[0] === "false") {
@@ -572,6 +576,89 @@ describe("example workspaces (simulated host tools)", () => {
     const rebuiltState = await readJson(fixture.statePath);
     expect(rebuiltState.ports).toEqual([6000, 6001, 6002]);
     expect(rebuiltState.sshEnabled).toBe(false);
+  });
+
+  test("runs and persists the startup command across up and rebuild", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+    const startupCommand = ".devbox/clanky-worker/start.sh";
+
+    const firstUp = runCli(fixture, [
+      "up",
+      "--no-ssh",
+      "--startup-command",
+      startupCommand,
+      "--allow-missing-ssh",
+    ]);
+    expect(firstUp.exitCode).toBe(0);
+
+    const stateAfterFirstUp = await readJson(fixture.statePath);
+    expect(stateAfterFirstUp.startupCommand).toBe(startupCommand);
+
+    const countStartupCommands = async (): Promise<number> => {
+      const commands = await readCommandLog(fixture.commandLogPath);
+      return commands.filter(
+        (entry) =>
+          entry.tool === "devcontainer" &&
+          entry.args[0] === "exec" &&
+          entry.script === startupCommand,
+      ).length;
+    };
+
+    expect(await countStartupCommands()).toBe(1);
+
+    const down = runCli(fixture, ["down"]);
+    expect(down.exitCode).toBe(0);
+
+    const secondUp = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(secondUp.exitCode).toBe(0);
+    expect(await countStartupCommands()).toBe(2);
+
+    const rebuild = runCli(fixture, ["rebuild", "--no-ssh", "--allow-missing-ssh"]);
+    expect(rebuild.exitCode).toBe(0);
+    expect(await countStartupCommands()).toBe(3);
+
+    const clear = runCli(fixture, ["up", "--no-ssh", "--no-startup-command", "--allow-missing-ssh"]);
+    expect(clear.exitCode).toBe(0);
+    const stateAfterClear = await readJson(fixture.statePath);
+    expect(stateAfterClear.startupCommand).toBeUndefined();
+    expect(await countStartupCommands()).toBe(3);
+  });
+
+  test("recovers from an invalid persisted startup command", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+
+    const initialUp = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(initialUp.exitCode).toBe(0);
+
+    const invalidState = await readJson(fixture.statePath);
+    invalidState.startupCommand = 42;
+    await writeFile(fixture.statePath, `${JSON.stringify(invalidState, null, 2)}\n`, "utf8");
+
+    const clear = runCli(fixture, ["up", "--no-ssh", "--no-startup-command", "--allow-missing-ssh"]);
+    expect(clear.exitCode).toBe(0);
+    expect(clear.stderr).toContain("Ignoring invalid startupCommand");
+
+    const stateAfterClear = await readJson(fixture.statePath);
+    expect(stateAfterClear.startupCommand).toBeUndefined();
+  });
+
+  test("persists the startup command when its first execution fails", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+
+    const failedUp = runCli(fixture, [
+      "up",
+      "--no-ssh",
+      "--startup-command",
+      "false",
+      "--allow-missing-ssh",
+    ]);
+    expect(failedUp.exitCode).toBe(7);
+
+    const stateAfterFailure = await readJson(fixture.statePath);
+    expect(stateAfterFailure.startupCommand).toBe("false");
+
+    const retry = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(retry.exitCode).toBe(7);
   });
 
   test("complex workspace preserves features and supports rebuild via the CLI", async () => {

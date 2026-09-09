@@ -41,6 +41,8 @@ export interface ParsedArgs {
   portCount?: number;
   allowMissingSsh: boolean;
   sshEnabled?: boolean;
+  startupCommand?: string;
+  clearStartupCommand?: boolean;
   devcontainerSubpath?: string;
   sshPublicKeyPath?: string;
   templateName?: string;
@@ -78,6 +80,7 @@ export interface WorkspaceState {
   workspaceHash: string;
   ports: number[];
   sshEnabled: boolean;
+  startupCommand?: string;
   configSource: "repo" | "template";
   sourceConfigPath: string | null;
   generatedConfigPath: string;
@@ -158,8 +161,8 @@ export function helpText(): string {
     "",
     "Usage:",
     `  ${CLI_NAME}`,
-    `  ${CLI_NAME} up [port] [--ports <count>] [--allow-missing-ssh] [--no-ssh|--ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]`,
-    `  ${CLI_NAME} rebuild [port] [--ports <count>] [--allow-missing-ssh] [--no-ssh|--ssh] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]`,
+    `  ${CLI_NAME} up [port] [--ports <count>] [--allow-missing-ssh] [--no-ssh|--ssh] [--startup-command <command>|--no-startup-command] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--template <name>] [--gh-user <login>] [--gh-host <host>]`,
+    `  ${CLI_NAME} rebuild [port] [--ports <count>] [--allow-missing-ssh] [--no-ssh|--ssh] [--startup-command <command>|--no-startup-command] [--devcontainer-subpath <subpath>] [--ssh-public-key <path>] [--gh-user <login>] [--gh-host <host>]`,
     `  ${CLI_NAME} shell`,
     `  ${CLI_NAME} exec -- <command> [args...]`,
     `  ${CLI_NAME} status`,
@@ -188,6 +191,8 @@ export function helpText(): string {
     "  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.",
     "  --no-ssh                        Do not install or start devbox's bundled SSH server.",
     "  --ssh                           Install and start devbox's bundled SSH server.",
+    "  --startup-command <command>    Run and persist a command after the container starts.",
+    "  --no-startup-command           Clear the persisted post-start command.",
     "  --devcontainer-subpath <subpath> Use .devcontainer/<subpath>/devcontainer.json.",
     "  --ssh-public-key <path>         Use a specific SSH public key file instead of ~/.ssh/id_rsa.pub.",
     "  --template <name>               Use a built-in template instead of a repo devcontainer.",
@@ -263,6 +268,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let portCount: number | undefined;
   let allowMissingSsh = false;
   let sshEnabled: boolean | undefined;
+  let startupCommand: string | undefined;
+  let clearStartupCommand = false;
   let devcontainerSubpath: string | undefined;
   let sshPublicKeyPath: string | undefined;
   let templateName: string | undefined;
@@ -290,6 +297,35 @@ export function parseArgs(argv: string[]): ParsedArgs {
         throw new UserError("Cannot combine --ssh with --no-ssh.");
       }
       sshEnabled = nextSshEnabled;
+      continue;
+    }
+
+    if (arg === "--startup-command") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new UserError("Expected a value after --startup-command.");
+      }
+      if (clearStartupCommand) {
+        throw new UserError("Cannot combine --startup-command with --no-startup-command.");
+      }
+      startupCommand = parseStartupCommand(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--startup-command=")) {
+      if (clearStartupCommand) {
+        throw new UserError("Cannot combine --startup-command with --no-startup-command.");
+      }
+      startupCommand = parseStartupCommand(arg.slice("--startup-command=".length));
+      continue;
+    }
+
+    if (arg === "--no-startup-command") {
+      if (startupCommand !== undefined) {
+        throw new UserError("Cannot combine --startup-command with --no-startup-command.");
+      }
+      clearStartupCommand = true;
       continue;
     }
 
@@ -489,6 +525,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     throw new UserError(`The ${command} command does not accept ${sshEnabled ? "--ssh" : "--no-ssh"}.`);
   }
 
+  if (command !== "up" && command !== "rebuild" && startupCommand !== undefined) {
+    throw new UserError(`The ${command} command does not accept --startup-command.`);
+  }
+
+  if (command !== "up" && command !== "rebuild" && clearStartupCommand) {
+    throw new UserError(`The ${command} command does not accept --no-startup-command.`);
+  }
+
   if (command === "shell" && devcontainerSubpath !== undefined) {
     throw new UserError("The shell command does not accept --devcontainer-subpath.");
   }
@@ -611,6 +655,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     ...(portCount !== undefined ? { portCount } : {}),
     allowMissingSsh,
     ...(sshEnabled !== undefined ? { sshEnabled } : {}),
+    ...(startupCommand !== undefined ? { startupCommand } : {}),
+    ...(clearStartupCommand ? { clearStartupCommand } : {}),
     ...(devcontainerSubpath ? { devcontainerSubpath } : {}),
     ...(sshPublicKeyPath ? { sshPublicKeyPath } : {}),
     ...(templateName ? { templateName } : {}),
@@ -632,6 +678,15 @@ export function parsePort(raw: string): number {
   }
 
   return port;
+}
+
+export function parseStartupCommand(raw: string): string {
+  const command = raw.trim();
+  if (!command) {
+    throw new UserError("Startup command must not be empty.");
+  }
+
+  return command;
 }
 
 export function parsePortCount(raw: string): number {
@@ -790,6 +845,10 @@ export async function loadWorkspaceState(workspacePath: string): Promise<Workspa
     throw new UserError(
       `State file is invalid or unsupported; expected schema version ${STATE_VERSION} with a ports array and no port field: ${statePath}`,
     );
+  }
+
+  if (isInvalidPersistedStartupCommand(asRecord(parsed)?.startupCommand)) {
+    console.warn(`Warning: Ignoring invalid startupCommand in workspace state: ${statePath}`);
   }
 
   return parsedState;
@@ -984,6 +1043,7 @@ export function createWorkspaceState(input: {
   workspacePath: string;
   ports: number[];
   sshEnabled: boolean;
+  startupCommand?: string;
   configSource: "repo" | "template";
   sourceConfigPath: string | null;
   generatedConfigPath: string;
@@ -1001,6 +1061,7 @@ export function createWorkspaceState(input: {
     workspaceHash: hashWorkspacePath(input.workspacePath),
     ports,
     sshEnabled: input.sshEnabled,
+    ...(input.startupCommand !== undefined ? { startupCommand: input.startupCommand } : {}),
     configSource: input.configSource,
     sourceConfigPath: input.sourceConfigPath,
     generatedConfigPath: input.generatedConfigPath,
@@ -1414,6 +1475,7 @@ function parseWorkspaceState(value: unknown): WorkspaceState | null {
   const ports = record.ports as number[];
   const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : new Date().toISOString();
   const lastContainerId = typeof record.lastContainerId === "string" ? record.lastContainerId : undefined;
+  const startupCommand = parsePersistedStartupCommand(record.startupCommand);
   const githubAuth = normalizeGithubAuthPreference(record.githubAuth);
 
   if (
@@ -1433,6 +1495,7 @@ function parseWorkspaceState(value: unknown): WorkspaceState | null {
     workspaceHash: record.workspaceHash,
     ports,
     sshEnabled: record.sshEnabled,
+    ...(startupCommand !== undefined ? { startupCommand } : {}),
     configSource: record.configSource,
     sourceConfigPath: record.sourceConfigPath,
     generatedConfigPath:
@@ -1444,6 +1507,23 @@ function parseWorkspaceState(value: unknown): WorkspaceState | null {
     lastContainerId,
     updatedAt,
   };
+}
+
+function parsePersistedStartupCommand(value: unknown): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const command = value.trim();
+  return command.length > 0 ? command : undefined;
+}
+
+function isInvalidPersistedStartupCommand(value: unknown): boolean {
+  return value !== undefined && parsePersistedStartupCommand(value) === undefined;
 }
 
 function parsePersistedPortList(value: unknown): number[] | null {

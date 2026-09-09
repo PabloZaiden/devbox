@@ -58,6 +58,7 @@ import {
   requiresSshAuthSockPermissionFix,
   removeContainers,
   restoreRunnerHostKeys,
+  runStartupCommand,
   runDevcontainerCommand,
   startRunner,
   stopManagedSshd,
@@ -137,6 +138,8 @@ async function main(): Promise<void> {
     parsed.templateName,
     parsed.githubUser,
     parsed.githubHost,
+    parsed.startupCommand,
+    parsed.clearStartupCommand ?? false,
   );
 }
 
@@ -153,6 +156,8 @@ async function handleUpLike(
   templateName?: string,
   explicitGithubUser?: string,
   explicitGithubHost?: string,
+  explicitStartupCommand?: string,
+  clearStartupCommand = false,
 ): Promise<void> {
   const githubAuth = resolveGithubAuthPreference({
     explicitUser: explicitGithubUser,
@@ -161,6 +166,9 @@ async function handleUpLike(
     env: process.env,
   });
   const sshEnabled = explicitSshEnabled ?? getWorkspaceSshEnabled(state);
+  const startupCommand = clearStartupCommand
+    ? undefined
+    : explicitStartupCommand ?? state?.startupCommand;
   const environment = await ensureHostEnvironment({ allowMissingSsh, workspacePath, githubAuth });
   const resolvedSshPublicKey = sshEnabled
     ? await resolveSshPublicKey({ overridePath: sshPublicKeyPath })
@@ -387,21 +395,30 @@ async function handleUpLike(
     console.log("Bundled SSH server installation skipped; published ports are ready for the devcontainer service.");
   }
 
-  await saveWorkspaceState(
-    createWorkspaceState({
-      workspacePath,
-      ports,
-      sshEnabled,
-      configSource: resolvedConfig.configSource,
-      sourceConfigPath: resolvedConfig.sourceConfigPath,
-      generatedConfigPath,
-      userDataDir,
-      labels,
-      template: resolvedConfig.template,
-      githubAuth: environment.githubAuth,
-      containerId: upResult.containerId,
-    }),
-  );
+  const workspaceState = createWorkspaceState({
+    workspacePath,
+    ports,
+    sshEnabled,
+    startupCommand,
+    configSource: resolvedConfig.configSource,
+    sourceConfigPath: resolvedConfig.sourceConfigPath,
+    generatedConfigPath,
+    userDataDir,
+    labels,
+    template: resolvedConfig.template,
+    githubAuth: environment.githubAuth,
+    containerId: upResult.containerId,
+  });
+  await saveWorkspaceState(workspaceState);
+
+  if (startupCommand) {
+    await runStepWithHeartbeat({
+      startMessage: "Running the configured post-start command...",
+      heartbeatMessage: "Still running the configured post-start command",
+      successMessage: "Configured post-start command completed",
+      action: () => runStartupCommand(upResult.containerId, startupCommand),
+    });
+  }
 
   console.log(formatReadyMessage(upResult.containerId, ports, remoteWorkspaceFolder));
   if (!preparedKnownHosts.knownHostsPath || knownHostsCopyResult !== "copied") {

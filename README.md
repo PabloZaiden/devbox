@@ -1,6 +1,6 @@
 # devbox
 
-`devbox` is a CLI that turns the devcontainer definition in the current directory into a repeatable "start my workspace and expose one or more service ports" workflow, with an optional bundled SSH entrypoint.
+`devbox` is a CLI that turns the devcontainer definition in the current directory into a repeatable "start my workspace and expose one or more service ports" workflow, with an optional bundled SSH entrypoint and persistent post-start command hook.
 
 It does not modify the original `devcontainer.json`. Instead, it generates a derived config next to it, ignores that file locally when possible, and manages the resulting container with stable labels.
 
@@ -16,6 +16,7 @@ It does not modify the original `devcontainer.json`. Instead, it generates a der
 - Seeds the container user's global Git `user.name` and `user.email` from the host when available.
 - Injects `GH_TOKEN` from the GitHub CLI when available, optionally using a persisted per-workspace `gh` account.
 - Runs devbox's bundled SSH server setup script inside the devcontainer unless SSH is disabled.
+- Runs an optional persisted startup command inside the devcontainer after it is ready.
 - Stores devbox-owned state, SSH credentials, SSH metadata, and SSH host keys under the workspace-local `.devbox/` directory so they survive `down` / `rebuild`.
 
 ## Installation
@@ -66,6 +67,12 @@ devbox up --ports 3
 
 # Publish two ports without installing or starting bundled SSH
 devbox up --ports 2 --no-ssh
+
+# Run a persistent command after every devbox up or rebuild
+devbox up --no-ssh --startup-command '.devbox/clanky-worker/start.sh'
+
+# Clear the persistent post-start command
+devbox up --no-startup-command
 
 # Re-enable bundled SSH for a workspace previously started with --no-ssh
 devbox up --ssh
@@ -121,6 +128,10 @@ When you run `devbox up`, the port precedence is:
 
 Use `--ports <count>` to request how many ports should be published. If the first port is explicit, later ports are auto-assigned from the next port, skipping ports already in use. When SSH is enabled, only the first port is used by the bundled SSH server; the remaining ports are available for services in the devcontainer. `--no-ssh` disables only the bundled SSH server, while SSH agent sharing and the other Git/known-hosts integrations remain unchanged. `--ssh` re-enables the bundled server.
 
+`--startup-command <command>` stores a shell command in the workspace state and runs it inside the container after each successful `devbox up` or `devbox rebuild`, including runs started by `devbox arise`. The state is saved before the hook runs, so a failed first attempt remains configured for the next invocation. The command runs independently of the bundled SSH server and is executed through `devcontainer exec`; it should be idempotent and daemonize any long-running process it starts. Use `--no-startup-command` to clear the stored command. The hook is invoked by Devbox's CLI lifecycle, so a raw `docker restart` does not invoke it.
+
+If an older or manually edited state file contains an invalid `startupCommand`, Devbox ignores that value with a warning so the workspace remains manageable; the next `up` or `rebuild` rewrites the state cleanly.
+
 When you run `devbox rebuild`, omitting the port reuses the last stored port list for the current workspace.
 
 When changing the number of ports for an already running workspace, pass the desired count to `rebuild`, for example `devbox rebuild 6000 --ports 2`.
@@ -131,7 +142,8 @@ The workspace state file uses schema version `4` and stores the selected ports o
 {
   "version": 4,
   "ports": [5001, 5002],
-  "sshEnabled": false
+  "sshEnabled": false,
+  "startupCommand": ".devbox/clanky-worker/start.sh"
 }
 ```
 
@@ -244,7 +256,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 
 - When `devbox` uses a repo devcontainer, the generated config is written next to the original devcontainer config, using the alternate accepted devcontainer filename so relative Dockerfile paths keep working.
 - When `devbox` uses `--template`, it writes the generated config to `.devbox/.devcontainer.json` instead of creating a source devcontainer definition inside the repo.
-- `.devbox/` contains all devbox-owned local state (`state.json`, `user-data/`, template generated configs, and `ssh/`) and should stay ignored by version control.
+- `.devbox/` contains all devbox-owned local state (`state.json`, `user-data/`, template generated configs, `ssh/`, and any startup-command integration data) and should stay ignored by version control.
 - `.devbox/state.json` may include `githubAuth: { "host": "...", "user": "..." }` so tools can detect or preserve the GitHub CLI account devbox will use for future `GH_TOKEN` injection.
 - `--devcontainer-subpath services/api` tells `devbox` to use `.devcontainer/services/api/devcontainer.json`.
 - `--template <name>` explicitly chooses a built-in template, even if the repo already has a devcontainer definition. If no repo devcontainer exists and no template was previously saved, omitting `--template` falls back to `ubuntu`.
@@ -256,7 +268,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - For workspaces that pass the restart-readiness checks and are actually attempted, if there is more than one stopped managed container, `devbox arise` keeps the newest stopped container as the source of truth, removes the older stopped duplicates, and then reruns `devbox up`. Skipped or unrecoverable workspaces may retain older stopped duplicates.
 - `devbox up` prints all selected ports near the start of execution, before the longer devcontainer setup steps.
 - `down` removes managed containers but keeps `.devbox/`, so rebuilds can reuse the last selected ports/config source/template and SSH artifacts.
-- Re-running `devbox up` after a host restart recreates the desired state: container up, all configured ports published, and the SSH runner restarted when it is enabled.
+- Re-running `devbox up` after a host restart recreates the desired state: container up, all configured ports published, the SSH runner restarted when it is enabled, and the persisted startup command rerun when configured.
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
