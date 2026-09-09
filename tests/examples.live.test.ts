@@ -309,6 +309,56 @@ describe("example workspaces (real devcontainers)", () => {
   );
 
   liveTest(
+    "runs and reuses a startup command in a real devcontainer",
+    async () => {
+      const fixture = await setupLiveFixture("smoke-workspace");
+      const markerPath = path.posix.join(
+        fixture.remoteWorkspaceFolder,
+        ".devbox",
+        "startup-command-runs.txt",
+      );
+      const startupCommand = `printf '%s\\n' startup-ran >> ${quoteShell(markerPath)}`;
+
+      const initialUp = runCli(fixture, [
+        "up",
+        String(fixture.port),
+        "--no-ssh",
+        "--startup-command",
+        startupCommand,
+        "--allow-missing-ssh",
+      ]);
+      expect(initialUp.exitCode).toBe(0);
+      expect(initialUp.stdout).toContain("Configured post-start command completed");
+      expect(await readFile(path.join(fixture.workspacePath, ".devbox", "startup-command-runs.txt"), "utf8")).toBe(
+        "startup-ran\n",
+      );
+
+      const stateAfterInitialUp = await readJson(fixture.statePath);
+      expect(stateAfterInitialUp.startupCommand).toBe(startupCommand);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+
+      const secondUp = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+      expect(secondUp.exitCode).toBe(0);
+      expect(await readFile(path.join(fixture.workspacePath, ".devbox", "startup-command-runs.txt"), "utf8")).toBe(
+        "startup-ran\nstartup-ran\n",
+      );
+
+      const rebuild = runCli(fixture, ["rebuild", "--no-ssh", "--allow-missing-ssh"]);
+      expect(rebuild.exitCode).toBe(0);
+      expect(await readFile(path.join(fixture.workspacePath, ".devbox", "startup-command-runs.txt"), "utf8")).toBe(
+        "startup-ran\nstartup-ran\nstartup-ran\n",
+      );
+
+      const finalDown = runCli(fixture, ["down"]);
+      expect(finalDown.exitCode).toBe(0);
+      expect(await listManagedContainerIds(fixture)).toEqual([]);
+    },
+    { timeout: 12 * 60_000 },
+  );
+
+  liveTest(
     "complex workspace exercises real features and host integration",
     async () => {
       const fixture = await setupLiveFixture("complex-workspace", {
