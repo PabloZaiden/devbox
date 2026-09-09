@@ -130,6 +130,8 @@ Use `--ports <count>` to request how many ports should be published. If the firs
 
 `--startup-command <command>` stores a shell command in the workspace state and runs it inside the container after each successful `devbox up` or `devbox rebuild`, including runs started by `devbox arise`. The state is saved before the hook runs, so a failed first attempt remains configured for the next invocation. The command runs independently of the bundled SSH server and is executed through `devcontainer exec`; it should be idempotent and daemonize any long-running process it starts. Use `--no-startup-command` to clear the stored command. The hook is invoked by Devbox's CLI lifecycle, so a raw `docker restart` does not invoke it.
 
+If an older or manually edited state file contains an invalid `startupCommand`, Devbox ignores that value with a warning so the workspace remains manageable; the next `up` or `rebuild` rewrites the state cleanly.
+
 When you run `devbox rebuild`, omitting the port reuses the last stored port list for the current workspace.
 
 When changing the number of ports for an already running workspace, pass the desired count to `rebuild`, for example `devbox rebuild 6000 --ports 2`.

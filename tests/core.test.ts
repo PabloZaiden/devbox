@@ -475,7 +475,7 @@ describe("loadWorkspaceState", () => {
     });
   });
 
-  test("rejects an empty persisted startup command", async () => {
+  test("ignores an empty persisted startup command", async () => {
     const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
     tempPaths.push(workspacePath);
 
@@ -502,9 +502,8 @@ describe("loadWorkspaceState", () => {
       "utf8",
     );
 
-    await expect(loadWorkspaceState(workspacePath)).rejects.toThrow(
-      "State file startupCommand must be a non-empty string.",
-    );
+    const state = await loadWorkspaceState(workspacePath);
+    expect(state?.startupCommand).toBeUndefined();
   });
 
   test("drops invalid persisted GitHub auth preferences", async () => {

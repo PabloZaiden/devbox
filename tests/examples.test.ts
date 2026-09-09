@@ -624,6 +624,24 @@ describe("example workspaces (simulated host tools)", () => {
     expect(await countStartupCommands()).toBe(3);
   });
 
+  test("recovers from an invalid persisted startup command", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+
+    const initialUp = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(initialUp.exitCode).toBe(0);
+
+    const invalidState = await readJson(fixture.statePath);
+    invalidState.startupCommand = 42;
+    await writeFile(fixture.statePath, `${JSON.stringify(invalidState, null, 2)}\n`, "utf8");
+
+    const clear = runCli(fixture, ["up", "--no-ssh", "--no-startup-command", "--allow-missing-ssh"]);
+    expect(clear.exitCode).toBe(0);
+    expect(clear.stderr).toContain("Ignoring invalid startupCommand");
+
+    const stateAfterClear = await readJson(fixture.statePath);
+    expect(stateAfterClear.startupCommand).toBeUndefined();
+  });
+
   test("persists the startup command when its first execution fails", async () => {
     const fixture = await setupExampleFixture("smoke-workspace");
 

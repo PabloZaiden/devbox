@@ -847,6 +847,10 @@ export async function loadWorkspaceState(workspacePath: string): Promise<Workspa
     );
   }
 
+  if (isInvalidPersistedStartupCommand(asRecord(parsed)?.startupCommand)) {
+    console.warn(`Warning: Ignoring invalid startupCommand in workspace state: ${statePath}`);
+  }
+
   return parsedState;
 }
 
@@ -1510,11 +1514,16 @@ function parsePersistedStartupCommand(value: unknown): string | undefined {
     return undefined;
   }
 
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new UserError("State file startupCommand must be a non-empty string.");
+  if (typeof value !== "string") {
+    return undefined;
   }
 
-  return value.trim();
+  const command = value.trim();
+  return command.length > 0 ? command : undefined;
+}
+
+function isInvalidPersistedStartupCommand(value: unknown): boolean {
+  return value !== undefined && parsePersistedStartupCommand(value) === undefined;
 }
 
 function parsePersistedPortList(value: unknown): number[] | null {
