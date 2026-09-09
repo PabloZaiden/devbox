@@ -574,6 +574,52 @@ describe("example workspaces (simulated host tools)", () => {
     expect(rebuiltState.sshEnabled).toBe(false);
   });
 
+  test("runs and persists the startup command across up and rebuild", async () => {
+    const fixture = await setupExampleFixture("smoke-workspace");
+    const startupCommand = ".devbox/clanky-worker/start.sh";
+
+    const firstUp = runCli(fixture, [
+      "up",
+      "--no-ssh",
+      "--startup-command",
+      startupCommand,
+      "--allow-missing-ssh",
+    ]);
+    expect(firstUp.exitCode).toBe(0);
+
+    const stateAfterFirstUp = await readJson(fixture.statePath);
+    expect(stateAfterFirstUp.startupCommand).toBe(startupCommand);
+
+    const countStartupCommands = async (): Promise<number> => {
+      const commands = await readCommandLog(fixture.commandLogPath);
+      return commands.filter(
+        (entry) =>
+          entry.tool === "devcontainer" &&
+          entry.args[0] === "exec" &&
+          entry.script === startupCommand,
+      ).length;
+    };
+
+    expect(await countStartupCommands()).toBe(1);
+
+    const down = runCli(fixture, ["down"]);
+    expect(down.exitCode).toBe(0);
+
+    const secondUp = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(secondUp.exitCode).toBe(0);
+    expect(await countStartupCommands()).toBe(2);
+
+    const rebuild = runCli(fixture, ["rebuild", "--no-ssh", "--allow-missing-ssh"]);
+    expect(rebuild.exitCode).toBe(0);
+    expect(await countStartupCommands()).toBe(3);
+
+    const clear = runCli(fixture, ["up", "--no-ssh", "--no-startup-command", "--allow-missing-ssh"]);
+    expect(clear.exitCode).toBe(0);
+    const stateAfterClear = await readJson(fixture.statePath);
+    expect(stateAfterClear.startupCommand).toBeUndefined();
+    expect(await countStartupCommands()).toBe(3);
+  });
+
   test("complex workspace preserves features and supports rebuild via the CLI", async () => {
     const fixture = await setupExampleFixture("complex-workspace", {
       ghToken: "ghs_example_token",

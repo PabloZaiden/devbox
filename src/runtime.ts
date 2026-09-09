@@ -869,6 +869,19 @@ export async function startRunner(
   };
 }
 
+export async function runStartupCommand(containerId: string, command: string): Promise<void> {
+  await devcontainerExec(containerId, buildStartupCommandScript(command), { quiet: true });
+}
+
+export function buildStartupCommandScript(command: string): string {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    throw new UserError("Startup command must not be empty.");
+  }
+
+  return trimmed;
+}
+
 export function buildStartRunnerScript(port: number, remoteWorkspaceFolder: string): string {
   return `env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash -s`;
 }

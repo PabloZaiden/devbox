@@ -20,6 +20,7 @@ import {
   buildPersistRunnerHostKeysScript,
   buildRestoreRunnerHostKeysScript,
   buildStartRunnerScript,
+  buildStartupCommandScript,
   buildStopManagedSshdScript,
   formatDevcontainerProgressLine,
   getRunnerCredFile,
@@ -225,6 +226,18 @@ describe("buildStopManagedSshdScript", () => {
     expect(script).toContain('if [ "$link" = "socket:[$inode]" ]; then');
     expect(script).toContain('\ndone)\n');
     expect(script).not.toContain("do;");
+  });
+});
+
+describe("buildStartupCommandScript", () => {
+  test("preserves a configured shell command for devcontainer exec", () => {
+    expect(buildStartupCommandScript("  .devbox/clanky-worker/start.sh  ")).toBe(
+      ".devbox/clanky-worker/start.sh",
+    );
+  });
+
+  test("rejects an empty startup command", () => {
+    expect(() => buildStartupCommandScript("  ")).toThrow("Startup command must not be empty.");
   });
 });
 

@@ -22,6 +22,7 @@ import {
   prepareKnownHostsMount,
   loadWorkspaceState,
   parsePortCount,
+  parseStartupCommand,
   resolveWorkspaceConfig,
   resolvePort,
   resolveUpPortsPreference,
@@ -72,6 +73,24 @@ describe("parseArgs", () => {
       portCount: 2,
       allowMissingSsh: false,
       sshEnabled: true,
+    });
+  });
+
+  test("supports configuring and clearing a persisted startup command", () => {
+    expect(parseArgs(["up", "--startup-command", ".devbox/clanky-worker/start.sh"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      startupCommand: ".devbox/clanky-worker/start.sh",
+    });
+    expect(parseArgs(["rebuild", "--startup-command=.devbox/start.sh"])).toEqual({
+      command: "rebuild",
+      allowMissingSsh: false,
+      startupCommand: ".devbox/start.sh",
+    });
+    expect(parseArgs(["up", "--no-startup-command"])).toEqual({
+      command: "up",
+      allowMissingSsh: false,
+      clearStartupCommand: true,
     });
   });
 
@@ -270,6 +289,23 @@ describe("parseArgs", () => {
     expect(() => parseArgs(["up", "--gh-host", "https://github.com"])).toThrow("Invalid GitHub host:");
   });
 
+  test("rejects invalid and conflicting startup command options", () => {
+    expect(() => parseStartupCommand("  ")).toThrow("Startup command must not be empty.");
+    expect(() => parseArgs(["up", "--startup-command", " "])).toThrow("Startup command must not be empty.");
+    expect(() => parseArgs(["up", "--startup-command", "start", "--no-startup-command"])).toThrow(
+      "Cannot combine --startup-command with --no-startup-command.",
+    );
+    expect(() => parseArgs(["up", "--no-startup-command", "--startup-command", "start"])).toThrow(
+      "Cannot combine --startup-command with --no-startup-command.",
+    );
+    expect(() => parseArgs(["status", "--startup-command", "start"])).toThrow(
+      "The status command does not accept --startup-command.",
+    );
+    expect(() => parseArgs(["status", "--no-startup-command"])).toThrow(
+      "The status command does not accept --no-startup-command.",
+    );
+  });
+
   test("rejects invalid port counts and conflicting SSH options", () => {
     expect(() => parsePortCount("0")).toThrow("Port count must be between 1 and 65535.");
     expect(() => parseArgs(["up", "--ports", "two"])).toThrow("Invalid port count:");
@@ -297,6 +333,8 @@ describe("helpText", () => {
     expect(text).toContain("--ports <count>");
     expect(text).toContain("--no-ssh");
     expect(text).toContain("--ssh");
+    expect(text).toContain("--startup-command <command>");
+    expect(text).toContain("--no-startup-command");
   });
 
   test("lists all commands", () => {
@@ -403,6 +441,70 @@ describe("loadWorkspaceState", () => {
     await expect(loadWorkspaceState(workspacePath)).resolves.toMatchObject({
       githubAuth: { host: "github.com", user: "work-account" },
     });
+  });
+
+  test("loads a persisted startup command without requiring a schema migration", async () => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
+    tempPaths.push(workspacePath);
+
+    const statePath = getWorkspaceStateFile(workspacePath);
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        version: STATE_VERSION,
+        workspacePath,
+        workspaceHash: "hash",
+        ports: [5001],
+        sshEnabled: false,
+        startupCommand: ".devbox/clanky-worker/start.sh",
+        configSource: "repo",
+        sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+        generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devcontainer.json"),
+        labels: { managed: "true" },
+        userDataDir: path.join(workspacePath, ".devbox", "user-data"),
+        template: null,
+        githubAuth: null,
+        updatedAt: "2026-04-23T00:00:00.000Z",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(loadWorkspaceState(workspacePath)).resolves.toMatchObject({
+      startupCommand: ".devbox/clanky-worker/start.sh",
+    });
+  });
+
+  test("rejects an empty persisted startup command", async () => {
+    const workspacePath = await mkdtemp(path.join(os.tmpdir(), "devbox-workspace-"));
+    tempPaths.push(workspacePath);
+
+    const statePath = getWorkspaceStateFile(workspacePath);
+    await mkdir(path.dirname(statePath), { recursive: true });
+    await writeFile(
+      statePath,
+      `${JSON.stringify({
+        version: STATE_VERSION,
+        workspacePath,
+        workspaceHash: "hash",
+        ports: [5001],
+        sshEnabled: false,
+        startupCommand: " ",
+        configSource: "repo",
+        sourceConfigPath: path.join(workspacePath, ".devcontainer", "devcontainer.json"),
+        generatedConfigPath: path.join(workspacePath, ".devcontainer", ".devcontainer.json"),
+        labels: { managed: "true" },
+        userDataDir: path.join(workspacePath, ".devbox", "user-data"),
+        template: null,
+        githubAuth: null,
+        updatedAt: "2026-04-23T00:00:00.000Z",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(loadWorkspaceState(workspacePath)).rejects.toThrow(
+      "State file startupCommand must be a non-empty string.",
+    );
   });
 
   test("drops invalid persisted GitHub auth preferences", async () => {
