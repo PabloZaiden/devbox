@@ -277,6 +277,38 @@ describe("example workspaces (real devcontainers)", () => {
   );
 
   liveTest(
+    "recovers a real devcontainer from an invalid persisted startup command",
+    async () => {
+      const fixture = await setupLiveFixture("smoke-workspace");
+      const initialUp = runCli(fixture, [
+        "up",
+        String(fixture.port),
+        "--no-ssh",
+        "--allow-missing-ssh",
+      ]);
+
+      expect(initialUp.exitCode).toBe(0);
+
+      const invalidState = await readJson(fixture.statePath);
+      invalidState.startupCommand = 42;
+      await writeFile(fixture.statePath, `${JSON.stringify(invalidState, null, 2)}\n`, "utf8");
+
+      const clear = runCli(fixture, ["up", "--no-ssh", "--no-startup-command", "--allow-missing-ssh"]);
+      expect(clear.exitCode).toBe(0);
+      expect(clear.stderr).toContain("Ignoring invalid startupCommand");
+
+      const stateAfterClear = await readJson(fixture.statePath);
+      expect(stateAfterClear.startupCommand).toBeUndefined();
+      expect(inspectContainer(fixture, String(stateAfterClear.lastContainerId)).State?.Running).toBe(true);
+
+      const down = runCli(fixture, ["down"]);
+      expect(down.exitCode).toBe(0);
+      expect(await listManagedContainerIds(fixture)).toEqual([]);
+    },
+    { timeout: 10 * 60_000 },
+  );
+
+  liveTest(
     "complex workspace exercises real features and host integration",
     async () => {
       const fixture = await setupLiveFixture("complex-workspace", {
