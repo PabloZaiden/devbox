@@ -272,7 +272,7 @@ The complex example uses several devcontainer features, so the first `up` or `re
 - When Docker Desktop host services are available, `devbox` can share the SSH agent without relying on a host-shell `SSH_AUTH_SOCK`.
 - On Docker Desktop, `devbox` prefers the Docker-provided SSH agent socket over the host `SSH_AUTH_SOCK`, which avoids macOS launchd socket mount issues.
 - `--allow-missing-ssh` starts the workspace without mounting an SSH agent and prints a warning instead of failing.
-- `--no-ssh` skips installation and startup of the bundled SSH server but still shares the SSH agent and configures the other host integrations.
+- `--no-ssh` skips starting the bundled SSH server but still installs the common container tools, shares the SSH agent, and configures the other host integrations.
 - `--ssh` explicitly enables the bundled SSH server for a workspace whose saved state has SSH disabled.
 - `devbox` stages a snapshot of the host `~/.ssh/known_hosts` before startup and skips injection with a warning when that file is missing, unreadable, empty, symlinked, or not a regular file.
 - `devbox` tries to install the host public key from `~/.ssh/id_rsa.pub` for SSH key-based login inside the container; if that default file is missing, it simply skips that step.

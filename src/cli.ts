@@ -327,7 +327,7 @@ async function handleUpLike(
   console.log(
     sshEnabled
       ? "Configuring SSH access inside the devcontainer..."
-      : "Configuring devcontainer access without installing the bundled SSH server...",
+      : "Configuring devcontainer access without starting the bundled SSH server...",
   );
   if (requiresSshAuthSockPermissionFix(environment.sshAuthSock)) {
     console.log("Making the forwarded SSH agent socket accessible to the container user...");
@@ -344,15 +344,32 @@ async function handleUpLike(
     console.log("Syncing Git author identity from the host into the devcontainer...");
     await configureGitIdentity(upResult.containerId, environment.gitUserName, environment.gitUserEmail);
   }
+  if (!sshEnabled && existingInspects.length > 0) {
+    const previousPorts = new Set<number>([
+      ...getWorkspacePorts(state),
+      ...(getManagedPortFromContainerName(existingInspects[0]?.Name) !== undefined
+        ? [getManagedPortFromContainerName(existingInspects[0]?.Name)!]
+        : []),
+    ]);
+    for (const previousPort of previousPorts) {
+      await stopManagedSshd(upResult.containerId, previousPort);
+    }
+  }
   if (sshEnabled) {
     await stopManagedSshd(upResult.containerId, ports[0]);
     await restoreRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
-    const runnerCredentials = await runStepWithHeartbeat({
-      startMessage: "Installing and starting the SSH server inside the container (first run can take a bit)...",
-      heartbeatMessage: "Still installing and starting the SSH server",
-      successMessage: "SSH server is ready",
-      action: () => startRunner(upResult.containerId, ports[0], remoteWorkspaceFolder),
-    });
+  }
+  const runnerCredentials = await runStepWithHeartbeat({
+    startMessage: sshEnabled
+      ? "Installing and starting the SSH server inside the container (first run can take a bit)..."
+      : "Installing bundled development tools inside the container (first run can take a bit)...",
+    heartbeatMessage: sshEnabled
+      ? "Still installing and starting the SSH server"
+      : "Still installing bundled development tools",
+    successMessage: sshEnabled ? "SSH server is ready" : "Bundled development tools are ready",
+    action: () => startRunner(upResult.containerId, ports[0], remoteWorkspaceFolder, sshEnabled),
+  });
+  if (sshEnabled) {
     if (resolvedSshPublicKey.publicKey) {
       const sshUser = runnerCredentials.user ?? upResult.remoteUser;
       if (!sshUser) {
@@ -381,18 +398,7 @@ async function handleUpLike(
     console.log("Saving SSH server state for future runs...");
     await persistRunnerHostKeys(upResult.containerId, remoteWorkspaceFolder);
   } else {
-    if (existingInspects.length > 0) {
-      const previousPorts = new Set<number>([
-        ...getWorkspacePorts(state),
-        ...(getManagedPortFromContainerName(existingInspects[0]?.Name) !== undefined
-          ? [getManagedPortFromContainerName(existingInspects[0]?.Name)!]
-          : []),
-      ]);
-      for (const previousPort of previousPorts) {
-        await stopManagedSshd(upResult.containerId, previousPort);
-      }
-    }
-    console.log("Bundled SSH server installation skipped; published ports are ready for the devcontainer service.");
+    console.log("Bundled SSH server remains disabled; common container tools were installed.");
   }
 
   const workspaceState = createWorkspaceState({

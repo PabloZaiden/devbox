@@ -26,6 +26,7 @@ interface ExampleFixture {
   env: Record<string, string>;
   generatedConfigPath: string;
   homeDir: string;
+  runnerSetupPath: string;
   sourceConfigPath: string | null;
   sshAuthSockPath: string | null;
   statePath: string;
@@ -48,7 +49,15 @@ interface LoggedCommand {
 }
 
 const FAKE_HOST_TOOL = String.raw`#!/usr/bin/env bun
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 const tool = process.env.DEVBOX_FAKE_TOOL;
@@ -140,6 +149,147 @@ function getPublishedPorts(runArgs) {
   }
 
   return ports;
+}
+
+function writeFakeExecutable(filePath, source) {
+  writeFileSync(filePath, "#!" + process.execPath + "\n" + source + "\n", "utf8");
+  chmodSync(filePath, 0o755);
+}
+
+function linkSystemCommand(binDir, name) {
+  const sourcePath = path.join("/bin", name);
+  if (!existsSync(sourcePath)) {
+    throw new Error("Missing system command for fake runner: " + sourcePath);
+  }
+
+  symlinkSync(sourcePath, path.join(binDir, name));
+}
+
+function runNoSshRunner(container, runnerScript) {
+  const setupRoot = path.join(root, "runner-setup-" + Date.now() + "-" + Math.random().toString(16).slice(2));
+  const binDir = path.join(setupRoot, "bin");
+  const homeDir = path.join(setupRoot, "home");
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(homeDir, { recursive: true });
+
+  for (const command of ["bash", "mkdir", "dirname", "pwd", "touch", "grep", "id", "chmod", "cat"]) {
+    linkSystemCommand(binDir, command);
+  }
+
+  writeFakeExecutable(path.join(binDir, "dpkg-query"), 'console.log("not-installed");');
+  writeFakeExecutable(path.join(binDir, "rm"), "process.exit(0);");
+  writeFakeExecutable(
+    path.join(binDir, "node"),
+    [
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'const root = process.env.FAKE_RUNNER_ROOT;',
+      'fs.writeFileSync(path.join(root, "node-invoked"), "true\\n");',
+      'console.log("v24.0.0");',
+    ].join("\n"),
+  );
+  writeFakeExecutable(
+    path.join(binDir, "npm"),
+    [
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'const root = process.env.FAKE_RUNNER_ROOT;',
+      'const args = process.argv.slice(2);',
+      'if (args[0] === "-v") {',
+      '  fs.writeFileSync(path.join(root, "npm-invoked"), "true\\n");',
+      '  console.log("10.0.0");',
+      '  process.exit(0);',
+      '}',
+      'if (args[0] === "install" && args.includes("-g") && args.includes("@fresh-editor/fresh-editor")) {',
+      '  fs.writeFileSync(path.join(root, "fresh-editor-installed"), "true\\n");',
+      '}',
+    ].join("\n"),
+  );
+  writeFakeExecutable(
+    path.join(binDir, "apt-get"),
+    [
+      'const fs = require("node:fs");',
+      'const path = require("node:path");',
+      'const { chmodSync } = require("node:fs");',
+      'const root = process.env.FAKE_RUNNER_ROOT;',
+      'const bin = process.env.FAKE_RUNNER_BIN;',
+      'const args = process.argv.slice(2);',
+      'if (args[0] === "update") {',
+      '  fs.appendFileSync(path.join(root, "apt-updates"), "update\\n");',
+      '  process.exit(0);',
+      '}',
+      'if (args[0] !== "install") {',
+      '  process.exit(0);',
+      '}',
+      'for (const pkg of args.filter((arg) => !arg.startsWith("-"))) {',
+      '  fs.writeFileSync(path.join(root, "apt-" + pkg), "installed\\n");',
+      '  if (["gh", "dtach", "tmux", "git"].includes(pkg)) {',
+      '    const commandPath = path.join(bin, pkg);',
+      '    fs.writeFileSync(commandPath, "#!" + process.execPath + "\\nprocess.exit(0);\\n");',
+      '    chmodSync(commandPath, 0o755);',
+      '  }',
+      '}',
+    ].join("\n"),
+  );
+  writeFakeExecutable(
+    path.join(binDir, "sudo"),
+    [
+      'const { spawnSync } = require("node:child_process");',
+      'const args = process.argv.slice(2).filter((arg) => arg !== "-n");',
+      'if (args.length === 1 && args[0] === "true") {',
+      '  process.exit(0);',
+      '}',
+      'const executable = args[0] === "env" ? "/usr/bin/env" : args[0];',
+      'const result = spawnSync(executable, args.slice(1), { env: process.env, stdio: "inherit" });',
+      'process.exit(result.status ?? 1);',
+    ].join("\n"),
+  );
+
+  const result = Bun.spawnSync(["/bin/bash", "-lc", runnerScript], {
+    cwd: container?.workspacePath ?? setupRoot,
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      PATH: binDir,
+      START_SSH_SERVER: "0",
+      FAKE_RUNNER_ROOT: setupRoot,
+      FAKE_RUNNER_BIN: binDir,
+      SSH_AUTH_SOCK: "",
+    },
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const stdout = Buffer.from(result.stdout).toString("utf8");
+  const stderr = Buffer.from(result.stderr).toString("utf8");
+  const installedPackages = ["dtach", "tmux", "git", "gh", "openssh-server", "uuid-runtime"].filter((pkg) =>
+    existsSync(path.join(setupRoot, "apt-" + pkg)),
+  );
+
+  writeFileSync(
+    path.join(root, "runner-setup.json"),
+    JSON.stringify(
+      {
+        exitCode: result.exitCode,
+        stdout,
+        stderr,
+        installedPackages,
+        ghInstalled: existsSync(path.join(binDir, "gh")),
+        nodeInvoked: existsSync(path.join(setupRoot, "node-invoked")),
+        npmInvoked: existsSync(path.join(setupRoot, "npm-invoked")),
+        freshEditorInstalled: existsSync(path.join(setupRoot, "fresh-editor-installed")),
+      },
+      null,
+      2,
+    ) + "\n",
+    "utf8",
+  );
+
+  if (result.exitCode !== 0) {
+    console.error(stderr || stdout || "Fake bundled runner failed.");
+    process.exit(result.exitCode ?? 1);
+  }
+
+  console.log(stdout);
 }
 
 function buildInspectPayload(container) {
@@ -280,16 +430,20 @@ function handleDevcontainer() {
 
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     const runArgs = Array.isArray(config.runArgs) ? config.runArgs.map(String) : [];
-    const containerId = "fake-container-" + state.nextId;
     const containerName = getContainerName(runArgs, "devbox-fake-" + state.nextId);
     const ports = getPublishedPorts(runArgs);
     const labels = parseLabels(args);
+    const existingContainer = Object.values(state.containers).find(
+      (container) =>
+        container.running &&
+        Object.entries(labels).every(([key, value]) => container.labels?.[key] === value),
+    );
+    const containerId = existingContainer?.id ?? "fake-container-" + state.nextId;
     const remoteWorkspaceFolder =
       typeof config.workspaceFolder === "string" && config.workspaceFolder.length > 0
         ? config.workspaceFolder
         : path.posix.join("/workspaces", path.basename(workspacePath));
 
-    state.nextId += 1;
     state.containers[containerId] = {
       id: containerId,
       labels,
@@ -300,6 +454,9 @@ function handleDevcontainer() {
       running: true,
       workspacePath,
     };
+    if (!existingContainer) {
+      state.nextId += 1;
+    }
     mkdirSync(userDataDir, { recursive: true });
     saveState(state);
     log({ configPath, containerId, labels, workspacePath });
@@ -318,6 +475,13 @@ function handleDevcontainer() {
 
     if (script.includes("/run/devbox-known_hosts")) {
       console.log(process.env.DEVBOX_FAKE_KNOWN_HOSTS_MODE || "missing");
+      return;
+    }
+
+    if (script.includes("START_SSH_SERVER='0'")) {
+      const runnerScript = readFileSync(0, "utf8");
+      const container = containerId ? state.containers[containerId] : null;
+      runNoSshRunner(container, runnerScript);
       return;
     }
 
@@ -517,10 +681,18 @@ describe("example workspaces (simulated host tools)", () => {
     const withoutSsh = runCli(fixture, ["up", "6000", "--ports", "3", "--no-ssh", "--allow-missing-ssh"]);
     expect(withoutSsh.exitCode).toBe(0);
     expect(withoutSsh.stdout).toContain("Using ports 6000, 6001, 6002.");
-    expect(withoutSsh.stdout).toContain("Bundled SSH server installation skipped");
+    expect(withoutSsh.stdout).toContain("Bundled SSH server remains disabled; common container tools were installed.");
     expect(withoutSsh.stdout).not.toContain("SSH server:");
     expect(withoutSsh.stdout).toContain("Ready.");
     expect(withoutSsh.stdout).toContain("ports 6000, 6001, 6002");
+
+    const runnerSetup = await readJson(fixture.runnerSetupPath);
+    expect(runnerSetup.exitCode).toBe(0);
+    expect(runnerSetup.installedPackages).toEqual(["dtach", "tmux", "git", "gh"]);
+    expect(runnerSetup.ghInstalled).toBe(true);
+    expect(runnerSetup.nodeInvoked).toBe(true);
+    expect(runnerSetup.npmInvoked).toBe(true);
+    expect(runnerSetup.freshEditorInstalled).toBe(true);
 
     const generatedConfig = await readJson(fixture.generatedConfigPath);
     expect(generatedConfig.runArgs).toEqual([
@@ -540,6 +712,14 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stateWithoutSsh.sshEnabled).toBe(false);
 
     const commandsWithoutSsh = await readCommandLog(fixture.commandLogPath);
+    expect(
+      commandsWithoutSsh.some(
+        (entry) =>
+          entry.tool === "devcontainer" &&
+          entry.args[0] === "exec" &&
+          entry.script === "env START_SSH_SERVER='0' bash -s",
+      ),
+    ).toBe(true);
     expect(
       commandsWithoutSsh.some((entry) => typeof entry.script === "string" && entry.script.includes("SSH_PORT=")),
     ).toBe(false);
@@ -570,9 +750,33 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stateWithSsh.ports).toEqual([6000, 6001, 6002]);
     expect(stateWithSsh.sshEnabled).toBe(true);
 
+    const commandsBeforeDisablingSsh = await readCommandLog(fixture.commandLogPath);
+    const switchedWithoutSsh = runCli(fixture, ["up", "--no-ssh", "--allow-missing-ssh"]);
+    expect(switchedWithoutSsh.exitCode).toBe(0);
+    expect(switchedWithoutSsh.stdout).toContain(
+      "Bundled SSH server remains disabled; common container tools were installed.",
+    );
+
+    const commandsAfterDisablingSsh = await readCommandLog(fixture.commandLogPath);
+    const cleanupCommands = commandsAfterDisablingSsh.slice(commandsBeforeDisablingSsh.length);
+    expect(
+      cleanupCommands.some(
+        (entry) =>
+          entry.tool === "docker" &&
+          entry.args[0] === "exec" &&
+          entry.user === "root" &&
+          typeof entry.script === "string" &&
+          entry.script.includes("target_port=':1770'"),
+      ),
+    ).toBe(true);
+    const switchedState = await readJson(fixture.statePath);
+    expect(switchedState.sshEnabled).toBe(false);
+
     const rebuiltWithoutSsh = runCli(fixture, ["rebuild", "--no-ssh", "--allow-missing-ssh"]);
     expect(rebuiltWithoutSsh.exitCode).toBe(0);
-    expect(rebuiltWithoutSsh.stdout).toContain("Bundled SSH server installation skipped");
+    expect(rebuiltWithoutSsh.stdout).toContain(
+      "Bundled SSH server remains disabled; common container tools were installed.",
+    );
     const rebuiltState = await readJson(fixture.statePath);
     expect(rebuiltState.ports).toEqual([6000, 6001, 6002]);
     expect(rebuiltState.sshEnabled).toBe(false);
@@ -884,6 +1088,7 @@ async function setupExampleFixture(exampleName: string, options: ExampleFixtureO
     env,
     generatedConfigPath: sourceConfigPath ? getGeneratedConfigPath(sourceConfigPath) : path.join(stateDir, ".devcontainer.json"),
     homeDir,
+    runnerSetupPath: path.join(fakeHostDir, "runner-setup.json"),
     sourceConfigPath,
     sshAuthSockPath,
     statePath: path.join(stateDir, "state.json"),
