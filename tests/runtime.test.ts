@@ -736,7 +736,9 @@ describe("buildStartRunnerScript", () => {
   test("runs the bundled runner from stdin without downloading an external script", () => {
     const script = buildStartRunnerScript(5001, "/workspaces/example-project");
 
-    expect(script).toBe("env SSH_PORT='5001' CRED_FILE='/workspaces/example-project/.devbox/ssh/credentials' bash -s");
+    expect(script).toBe(
+      "env START_SSH_SERVER='1' SSH_PORT='5001' CRED_FILE='/workspaces/example-project/.devbox/ssh/credentials' bash -s",
+    );
     expect(script).not.toContain("curl");
     expect(script).not.toContain("http");
   });

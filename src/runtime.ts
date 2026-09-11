@@ -892,7 +892,10 @@ export function buildStartRunnerScript(
     return `env START_SSH_SERVER=${quoteShell("0")} bash -s`;
   }
 
-  return `env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash -s`;
+  return (
+    `env START_SSH_SERVER=${quoteShell("1")} SSH_PORT=${quoteShell(String(port))} ` +
+    `CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash -s`
+  );
 }
 
 export async function persistRunnerHostKeys(

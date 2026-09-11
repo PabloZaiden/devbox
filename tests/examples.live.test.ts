@@ -244,6 +244,13 @@ describe("example workspaces (real devcontainers)", () => {
       expect(state.ports[0]).toBe(fixture.port);
       expect(state.sshEnabled).toBe(false);
 
+      const commonTools = execInContainer(
+        fixture,
+        containerId,
+        "command -v gh && node --version && npm --version && command -v fresh && git --version && tmux -V && dtach -V",
+      );
+      expect(commonTools.exitCode).toBe(0);
+
       const inspect = inspectContainer(fixture, containerId);
       for (const port of state.ports as number[]) {
         expect(getPublishedHostPort(inspect, port)).toBe(String(port));
