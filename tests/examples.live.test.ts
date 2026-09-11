@@ -247,7 +247,7 @@ describe("example workspaces (real devcontainers)", () => {
       const commonTools = execInContainer(
         fixture,
         containerId,
-        "command -v gh && node --version && npm --version && command -v fresh && git --version && tmux -V && dtach -V",
+        "command -v gh && node --version && npm --version && command -v fresh && git --version && tmux -V && command -v dtach",
       );
       expect(commonTools.exitCode).toBe(0);
 

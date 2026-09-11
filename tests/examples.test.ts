@@ -231,6 +231,19 @@ function runNoSshRunner(container, runnerScript) {
       '}',
     ].join("\n"),
   );
+  writeFakeExecutable(
+    path.join(binDir, "sudo"),
+    [
+      'const { spawnSync } = require("node:child_process");',
+      'const args = process.argv.slice(2).filter((arg) => arg !== "-n");',
+      'if (args.length === 1 && args[0] === "true") {',
+      '  process.exit(0);',
+      '}',
+      'const executable = args[0] === "env" ? "/usr/bin/env" : args[0];',
+      'const result = spawnSync(executable, args.slice(1), { env: process.env, stdio: "inherit" });',
+      'process.exit(result.status ?? 1);',
+    ].join("\n"),
+  );
 
   const result = Bun.spawnSync(["/bin/bash", "-lc", runnerScript], {
     cwd: container?.workspacePath ?? setupRoot,
