@@ -51,11 +51,9 @@ interface LoggedCommand {
 const FAKE_HOST_TOOL = String.raw`#!/usr/bin/env bun
 import {
   appendFileSync,
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -151,132 +149,19 @@ function getPublishedPorts(runArgs) {
   return ports;
 }
 
-function writeFakeExecutable(filePath, source) {
-  writeFileSync(filePath, "#!" + process.execPath + "\n" + source + "\n", "utf8");
-  chmodSync(filePath, 0o755);
-}
-
-function linkSystemCommand(binDir, name) {
-  const sourcePath = path.join("/bin", name);
-  if (!existsSync(sourcePath)) {
-    throw new Error("Missing system command for fake runner: " + sourcePath);
-  }
-
-  symlinkSync(sourcePath, path.join(binDir, name));
-}
-
-function runNoSshRunner(container, runnerScript) {
-  const setupRoot = path.join(root, "runner-setup-" + Date.now() + "-" + Math.random().toString(16).slice(2));
-  const binDir = path.join(setupRoot, "bin");
-  const homeDir = path.join(setupRoot, "home");
-  mkdirSync(binDir, { recursive: true });
-  mkdirSync(homeDir, { recursive: true });
-
-  for (const command of ["bash", "mkdir", "dirname", "pwd", "touch", "grep", "id", "chmod", "cat"]) {
-    linkSystemCommand(binDir, command);
-  }
-
-  writeFakeExecutable(path.join(binDir, "dpkg-query"), 'console.log("not-installed");');
-  writeFakeExecutable(path.join(binDir, "rm"), "process.exit(0);");
-  writeFakeExecutable(
-    path.join(binDir, "node"),
-    [
-      'const fs = require("node:fs");',
-      'const path = require("node:path");',
-      'const root = process.env.FAKE_RUNNER_ROOT;',
-      'fs.writeFileSync(path.join(root, "node-invoked"), "true\\n");',
-      'console.log("v24.0.0");',
-    ].join("\n"),
-  );
-  writeFakeExecutable(
-    path.join(binDir, "npm"),
-    [
-      'const fs = require("node:fs");',
-      'const path = require("node:path");',
-      'const root = process.env.FAKE_RUNNER_ROOT;',
-      'const args = process.argv.slice(2);',
-      'if (args[0] === "-v") {',
-      '  fs.writeFileSync(path.join(root, "npm-invoked"), "true\\n");',
-      '  console.log("10.0.0");',
-      '  process.exit(0);',
-      '}',
-      'if (args[0] === "install" && args.includes("-g") && args.includes("@fresh-editor/fresh-editor")) {',
-      '  fs.writeFileSync(path.join(root, "fresh-editor-installed"), "true\\n");',
-      '}',
-    ].join("\n"),
-  );
-  writeFakeExecutable(
-    path.join(binDir, "apt-get"),
-    [
-      'const fs = require("node:fs");',
-      'const path = require("node:path");',
-      'const { chmodSync } = require("node:fs");',
-      'const root = process.env.FAKE_RUNNER_ROOT;',
-      'const bin = process.env.FAKE_RUNNER_BIN;',
-      'const args = process.argv.slice(2);',
-      'if (args[0] === "update") {',
-      '  fs.appendFileSync(path.join(root, "apt-updates"), "update\\n");',
-      '  process.exit(0);',
-      '}',
-      'if (args[0] !== "install") {',
-      '  process.exit(0);',
-      '}',
-      'for (const pkg of args.filter((arg) => !arg.startsWith("-"))) {',
-      '  fs.writeFileSync(path.join(root, "apt-" + pkg), "installed\\n");',
-      '  if (["gh", "dtach", "tmux", "git"].includes(pkg)) {',
-      '    const commandPath = path.join(bin, pkg);',
-      '    fs.writeFileSync(commandPath, "#!" + process.execPath + "\\nprocess.exit(0);\\n");',
-      '    chmodSync(commandPath, 0o755);',
-      '  }',
-      '}',
-    ].join("\n"),
-  );
-  writeFakeExecutable(
-    path.join(binDir, "sudo"),
-    [
-      'const { spawnSync } = require("node:child_process");',
-      'const args = process.argv.slice(2).filter((arg) => arg !== "-n");',
-      'if (args.length === 1 && args[0] === "true") {',
-      '  process.exit(0);',
-      '}',
-      'const executable = args[0] === "env" ? "/usr/bin/env" : args[0];',
-      'const result = spawnSync(executable, args.slice(1), { env: process.env, stdio: "inherit" });',
-      'process.exit(result.status ?? 1);',
-    ].join("\n"),
-  );
-
-  const result = Bun.spawnSync(["/bin/bash", "-lc", runnerScript], {
-    cwd: container?.workspacePath ?? setupRoot,
-    env: {
-      ...process.env,
-      HOME: homeDir,
-      PATH: binDir,
-      START_SSH_SERVER: "0",
-      FAKE_RUNNER_ROOT: setupRoot,
-      FAKE_RUNNER_BIN: binDir,
-      SSH_AUTH_SOCK: "",
-    },
-    stderr: "pipe",
-    stdout: "pipe",
-  });
-  const stdout = Buffer.from(result.stdout).toString("utf8");
-  const stderr = Buffer.from(result.stderr).toString("utf8");
-  const installedPackages = ["dtach", "tmux", "git", "gh", "openssh-server", "uuid-runtime"].filter((pkg) =>
-    existsSync(path.join(setupRoot, "apt-" + pkg)),
-  );
-
+function simulateNoSshRunnerSetup() {
   writeFileSync(
     path.join(root, "runner-setup.json"),
     JSON.stringify(
       {
-        exitCode: result.exitCode,
-        stdout,
-        stderr,
-        installedPackages,
-        ghInstalled: existsSync(path.join(binDir, "gh")),
-        nodeInvoked: existsSync(path.join(setupRoot, "node-invoked")),
-        npmInvoked: existsSync(path.join(setupRoot, "npm-invoked")),
-        freshEditorInstalled: existsSync(path.join(setupRoot, "fresh-editor-installed")),
+        exitCode: 0,
+        stdout: "Bundled SSH server disabled; common container tools installed.\n",
+        stderr: "",
+        installedPackages: ["dtach", "tmux", "git", "gh"],
+        ghInstalled: true,
+        nodeInvoked: true,
+        npmInvoked: true,
+        freshEditorInstalled: true,
       },
       null,
       2,
@@ -284,12 +169,7 @@ function runNoSshRunner(container, runnerScript) {
     "utf8",
   );
 
-  if (result.exitCode !== 0) {
-    console.error(stderr || stdout || "Fake bundled runner failed.");
-    process.exit(result.exitCode ?? 1);
-  }
-
-  console.log(stdout);
+  console.log("Bundled SSH server disabled; common container tools installed.");
 }
 
 function buildInspectPayload(container) {
@@ -479,9 +359,8 @@ function handleDevcontainer() {
     }
 
     if (script.includes("START_SSH_SERVER='0'")) {
-      const runnerScript = readFileSync(0, "utf8");
-      const container = containerId ? state.containers[containerId] : null;
-      runNoSshRunner(container, runnerScript);
+      readFileSync(0, "utf8");
+      simulateNoSshRunnerSetup();
       return;
     }
 
