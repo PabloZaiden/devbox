@@ -189,7 +189,7 @@ export function helpText(): string {
     "  -p, --port <port>               Publish the same port on host and container.",
     "  --ports <count>                 Publish this many ports, auto-selecting later ports when needed.",
     "  --allow-missing-ssh             Continue without SSH agent sharing when unavailable.",
-    "  --no-ssh                        Do not install or start devbox's bundled SSH server.",
+    "  --no-ssh                        Do not start devbox's bundled SSH server; install the common container tools.",
     "  --ssh                           Install and start devbox's bundled SSH server.",
     "  --startup-command <command>    Run and persist a command after the container starts.",
     "  --no-startup-command           Clear the persisted post-start command.",

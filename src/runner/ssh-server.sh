@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+START_SSH_SERVER="${START_SSH_SERVER:-1}"
+if [[ "$START_SSH_SERVER" != "0" && "$START_SSH_SERVER" != "1" ]]; then
+  echo "ERROR: START_SSH_SERVER must be 0 or 1" >&2
+  exit 1
+fi
+export START_SSH_SERVER
+
 # get the latest vscode-generated auth sock, if available
 VSCODE_SSH_AUTH_SOCK=""
 mapfile -t vscode_ssh_socks < <(compgen -G "/tmp/vscode-ssh*.sock" || true)
@@ -57,7 +64,7 @@ as_root_bash() {
   fi
 
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    sudo -n bash -lc "$cmd"
+    sudo -n env "START_SSH_SERVER=${START_SSH_SERVER}" bash -lc "$cmd"
     return
   fi
 
@@ -76,13 +83,18 @@ resolve_path() {
 # Prefer the non-root invoker when using sudo
 CURRENT_USER="${SUDO_USER:-$(id -un)}"
 
-# Install deps and prep sshd dirs
+# Install common dependencies and prep sshd dirs when enabled
 as_root_bash '
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 missing_packages=()
-for package in openssh-server uuid-runtime dtach tmux git; do
+packages=(dtach tmux git)
+if [[ "$START_SSH_SERVER" == "1" ]]; then
+  packages+=(openssh-server uuid-runtime)
+fi
+
+for package in "${packages[@]}"; do
   if ! dpkg-query -W -f="\${db:Status-Status}" "$package" 2>/dev/null | grep -qx installed; then
     missing_packages+=("$package")
   fi
@@ -96,10 +108,12 @@ else
   echo "All apt packages already installed; skipping apt-get install."
 fi
 
-mkdir -p /var/run/sshd
-chown root:root /var/run/sshd
-chmod 0755 /var/run/sshd
-mkdir -p /etc/ssh/sshd_config.d
+if [[ "$START_SSH_SERVER" == "1" ]]; then
+  mkdir -p /var/run/sshd
+  chown root:root /var/run/sshd
+  chmod 0755 /var/run/sshd
+  mkdir -p /etc/ssh/sshd_config.d
+fi
 '
 
 # install GitHub CLI if missing
@@ -151,6 +165,11 @@ echo "min-release-age=3" > "$HOME/.npmrc"
 echo "[install]
 minimumReleaseAge = 259200" > "$HOME/.bunfig.toml"
 append_unique_line "$HOME/.tmux.conf" "set -g mouse on"
+
+if [[ "$START_SSH_SERVER" != "1" ]]; then
+  echo "Bundled SSH server disabled; common container tools installed."
+  exit 0
+fi
 
 # Use existing password if present, otherwise create it once
 if [[ -f "$CRED_FILE" ]]; then

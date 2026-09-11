@@ -321,6 +321,11 @@ function handleDevcontainer() {
       return;
     }
 
+    if (script.includes("START_SSH_SERVER='0'")) {
+      console.log("Bundled SSH server disabled; common container tools installed.");
+      return;
+    }
+
     if (script.includes("SSH_PORT=") && script.includes("CRED_FILE=")) {
       const match = script.match(/SSH_PORT='([^']+)'/);
       const port = match ? match[1] : "22";
@@ -517,7 +522,7 @@ describe("example workspaces (simulated host tools)", () => {
     const withoutSsh = runCli(fixture, ["up", "6000", "--ports", "3", "--no-ssh", "--allow-missing-ssh"]);
     expect(withoutSsh.exitCode).toBe(0);
     expect(withoutSsh.stdout).toContain("Using ports 6000, 6001, 6002.");
-    expect(withoutSsh.stdout).toContain("Bundled SSH server installation skipped");
+    expect(withoutSsh.stdout).toContain("Bundled SSH server remains disabled; common container tools were installed.");
     expect(withoutSsh.stdout).not.toContain("SSH server:");
     expect(withoutSsh.stdout).toContain("Ready.");
     expect(withoutSsh.stdout).toContain("ports 6000, 6001, 6002");
@@ -540,6 +545,14 @@ describe("example workspaces (simulated host tools)", () => {
     expect(stateWithoutSsh.sshEnabled).toBe(false);
 
     const commandsWithoutSsh = await readCommandLog(fixture.commandLogPath);
+    expect(
+      commandsWithoutSsh.some(
+        (entry) =>
+          entry.tool === "devcontainer" &&
+          entry.args[0] === "exec" &&
+          entry.script === "env START_SSH_SERVER='0' bash -s",
+      ),
+    ).toBe(true);
     expect(
       commandsWithoutSsh.some((entry) => typeof entry.script === "string" && entry.script.includes("SSH_PORT=")),
     ).toBe(false);
@@ -572,7 +585,9 @@ describe("example workspaces (simulated host tools)", () => {
 
     const rebuiltWithoutSsh = runCli(fixture, ["rebuild", "--no-ssh", "--allow-missing-ssh"]);
     expect(rebuiltWithoutSsh.exitCode).toBe(0);
-    expect(rebuiltWithoutSsh.stdout).toContain("Bundled SSH server installation skipped");
+    expect(rebuiltWithoutSsh.stdout).toContain(
+      "Bundled SSH server remains disabled; common container tools were installed.",
+    );
     const rebuiltState = await readJson(fixture.statePath);
     expect(rebuiltState.ports).toEqual([6000, 6001, 6002]);
     expect(rebuiltState.sshEnabled).toBe(false);

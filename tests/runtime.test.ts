@@ -740,6 +740,12 @@ describe("buildStartRunnerScript", () => {
     expect(script).not.toContain("curl");
     expect(script).not.toContain("http");
   });
+
+  test("runs common setup without starting the SSH server when requested", () => {
+    expect(buildStartRunnerScript(5001, "/workspaces/example-project", false)).toBe(
+      "env START_SSH_SERVER='0' bash -s",
+    );
+  });
 });
 
 describe("bundled runner script", () => {
@@ -749,6 +755,8 @@ describe("bundled runner script", () => {
     expect(script).toContain("mkdir -p /var/run/sshd");
     expect(script).toContain("chown root:root /var/run/sshd");
     expect(script).toContain("chmod 0755 /var/run/sshd");
+    expect(script).toContain("Bundled SSH server disabled; common container tools installed.");
+    expect(script).toContain("npm install -g @fresh-editor/fresh-editor");
   });
 });
 

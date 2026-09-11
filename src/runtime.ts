@@ -843,8 +843,9 @@ export async function startRunner(
   containerId: string,
   port: number,
   remoteWorkspaceFolder: string,
+  startSshServer = true,
 ): Promise<RunnerCredentials> {
-  const script = buildStartRunnerScript(port, remoteWorkspaceFolder);
+  const script = buildStartRunnerScript(port, remoteWorkspaceFolder, startSshServer);
   const result = await devcontainerExec(containerId, script, { quiet: true, stdin: bundledRunnerScript });
   const summaryLines = getRunnerSummaryLines(result.stdout);
   const parsedSummary = parseRunnerCredentials(summaryLines.join("\n"));
@@ -854,7 +855,7 @@ export async function startRunner(
     for (const line of summaryLines) {
       console.log(`  ${line}`);
     }
-  } else {
+  } else if (startSshServer) {
     const output = result.stdout.trim();
     if (output) {
       console.log(output);
@@ -864,7 +865,7 @@ export async function startRunner(
   return {
     user: parsedSummary.user,
     password: parsedSummary.password,
-    sshPort: parsedSummary.sshPort ?? port,
+    sshPort: parsedSummary.sshPort ?? (startSshServer ? port : null),
     permitRootLogin: parsedSummary.permitRootLogin,
   };
 }
@@ -882,7 +883,15 @@ export function buildStartupCommandScript(command: string): string {
   return trimmed;
 }
 
-export function buildStartRunnerScript(port: number, remoteWorkspaceFolder: string): string {
+export function buildStartRunnerScript(
+  port: number,
+  remoteWorkspaceFolder: string,
+  startSshServer = true,
+): string {
+  if (!startSshServer) {
+    return `env START_SSH_SERVER=${quoteShell("0")} bash -s`;
+  }
+
   return `env SSH_PORT=${quoteShell(String(port))} CRED_FILE=${quoteShell(getRunnerCredFile(remoteWorkspaceFolder))} bash -s`;
 }
 

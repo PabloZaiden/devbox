@@ -235,7 +235,7 @@ describe("example workspaces (real devcontainers)", () => {
 
       expect(up.exitCode).toBe(0);
       expect(up.stdout).toContain(`Using ports ${fixture.port},`);
-      expect(up.stdout).toContain("Bundled SSH server installation skipped");
+      expect(up.stdout).toContain("Bundled SSH server remains disabled; common container tools were installed.");
       expect(up.stdout).not.toContain("SSH server:");
 
       const state = await readJson(fixture.statePath);
